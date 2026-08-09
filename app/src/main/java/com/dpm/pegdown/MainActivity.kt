@@ -10,6 +10,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.LocationManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -26,6 +27,11 @@ import kotlin.math.atan2
 
 class MainActivity : Activity(), SensorEventListener {
 
+    private lateinit var fusedLocationClient: com.google.android.gms.location.FusedLocationProviderClient
+    private var currentLatitude: Double = 0.0
+    private var currentLongitude: Double = 0.0
+    private var lastPeakLeanAngle = 0.0
+    private var tempResetRunnable: Runnable? = null
     private lateinit var sensorManager: SensorManager
     private var linearAccelSensor: Sensor? = null
     private var gravitySensor: Sensor? = null
@@ -62,6 +68,42 @@ class MainActivity : Activity(), SensorEventListener {
     private lateinit var tvAccelLeft: TextView
     private lateinit var tvAccelRight: TextView
 
+    // GPS & Aufzeichnung ---
+    private var isRecording = false
+    private var hasUserStoppedRecording = false
+    private lateinit var locationManager: LocationManager
+    private var currentSpeedKmH = 0.0
+
+    // Aufzeichnungs- und Automatik-Modus ---
+    private enum class RecordingMode {
+        MANUAL,        // Komplett manuell
+        AUTO_IDLE,     // Automatik-Modus aktiv, wartet auf > 7 km/h
+        AUTO_RECORDING // Automatik-Modus hat automatisch gestartet
+    }
+    private var currentRecordMode = RecordingMode.MANUAL
+    private lateinit var btnRecord: Button
+
+    private val locationListener = android.location.LocationListener { location ->
+        currentLatitude = location.latitude
+        currentLongitude = location.longitude
+        currentSpeedKmH = if (location.hasSpeed()) location.speed * 3.6 else 0.0
+
+        // Automatischer Start im Auto-Modus prüfen
+        checkAutoStartCondition()
+    }
+
+    // Datenklasse für gespeicherte Events (Peaks / Tour-Max)
+    data class TourLogEntry(
+        val timestamp: String,
+        val leanAngleLeft: Double,
+        val leanAngleRight: Double,
+        val acceleration: Double,
+        val braking: Double,
+        val lat: Double,
+        val lon: Double
+    )
+    private val recordedEntries = mutableListOf<TourLogEntry>()
+
     private fun isGerman(): Boolean {
         val locale = resources.configuration.locales[0]
         return locale.language.equals("de", ignoreCase = true)
@@ -69,6 +111,15 @@ class MainActivity : Activity(), SensorEventListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            androidx.core.app.ActivityCompat.requestPermissions(
+                this,
+                arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION),
+                1001
+            )
+        }
 
         if (savedInstanceState != null) {
             isOrientationLocked = savedInstanceState.getBoolean("isOrientationLocked", false)
@@ -112,7 +163,7 @@ class MainActivity : Activity(), SensorEventListener {
         rootLayout.addView(gaugeView)
 
         val density = resources.displayMetrics.density
-        val buttonWidthPx = (190 * density).toInt()
+        val buttonWidthPx = (170 * density).toInt()
         val buttonHeightPx = (50 * density).toInt()
 
         fun createCornerButton(buttonText: String, normalColor: String, topMarginDp: Int): Button {
@@ -209,6 +260,20 @@ class MainActivity : Activity(), SensorEventListener {
             }
         }
 
+        btnRecord = createCornerButton(
+            if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record",
+            "#222222",
+            8
+        ).apply {
+            setOnClickListener {
+                handleRecordButtonClick()
+            }
+            setOnLongClickListener {
+                toggleAutoMode()
+                true
+            }
+        }
+
         val topLeftContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(20, 10, 20, 10)
@@ -234,6 +299,7 @@ class MainActivity : Activity(), SensorEventListener {
 
         topLeftContainer.addView(tvStatus)
         topLeftContainer.addView(btnInvertAxis)
+        topLeftContainer.addView(btnRecord)
         rootLayout.addView(topLeftContainer)
 
         val topRightContainer = LinearLayout(this).apply {
@@ -252,7 +318,6 @@ class MainActivity : Activity(), SensorEventListener {
         topRightContainer.addView(btnResetTour)
         rootLayout.addView(topRightContainer)
 
-        // --- ACCELERATION / BRAKE VIEWS IM URSPRÜNGLICHEN DESIGN ---
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         tvAccelLeft = TextView(this).apply {
@@ -373,6 +438,203 @@ class MainActivity : Activity(), SensorEventListener {
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         gravitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_GRAVITY)
         linearAccelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+
+        fusedLocationClient = com.google.android.gms.location.LocationServices.getFusedLocationProviderClient(this)
+
+        val locationRequest = com.google.android.gms.location.LocationRequest.Builder(
+            com.google.android.gms.location.Priority.PRIORITY_HIGH_ACCURACY, 2000L
+        ).setMinUpdateIntervalMillis(1000L).build()
+
+        val locationCallback = object : com.google.android.gms.location.LocationCallback() {
+            override fun onLocationResult(locationResult: com.google.android.gms.location.LocationResult) {
+                for (location in locationResult.locations) {
+                    currentLatitude = location.latitude
+                    currentLongitude = location.longitude
+                }
+            }
+        }
+
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION)
+            == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            fusedLocationClient.requestLocationUpdates(locationRequest, locationCallback, android.os.Looper.getMainLooper())
+        }
+    }
+
+    private fun handleRecordButtonClick() {
+        val bgDrawable = btnRecord.background as GradientDrawable
+
+        when (currentRecordMode) {
+            RecordingMode.MANUAL -> {
+                if (!isRecording) {
+                    isRecording = true
+                    hasUserStoppedRecording = false
+                    recordedEntries.clear()
+
+                    btnRecord.text = if (isGerman()) "🔴 Aufz. läuft" else "🔴 Recording"
+                    bgDrawable.setColor("#B71C1C".toColorInt())
+
+                    tvStatus.text = if (isGerman()) "Aufzeichnung aktiv" else "Recording active"
+                    tvStatus.setTextColor("#00E676".toColorInt())
+                } else {
+                    isRecording = false
+                    hasUserStoppedRecording = true
+                    showSaveDialog()
+
+                    btnRecord.text = if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record"
+                    bgDrawable.setColor("#222222".toColorInt())
+                }
+            }
+            RecordingMode.AUTO_IDLE -> {
+                isRecording = true
+                recordedEntries.clear()
+                currentRecordMode = RecordingMode.AUTO_RECORDING
+
+                btnRecord.text = if (isGerman()) "🔴 Auto: Läuft" else "🔴 Auto: Running"
+                bgDrawable.setColor("#B71C1C".toColorInt())
+            }
+            RecordingMode.AUTO_RECORDING -> {
+                isRecording = false
+                hasUserStoppedRecording = true
+                showSaveDialog()
+
+                currentRecordMode = RecordingMode.AUTO_IDLE
+                btnRecord.text = if (isGerman()) "🤖 Auto-Modus (Stand)" else "🤖 Auto-Mode (Idle)"
+                bgDrawable.setColor("#0D47A1".toColorInt())
+            }
+        }
+    }
+
+    private fun toggleAutoMode() {
+        val bgDrawable = btnRecord.background as GradientDrawable
+
+        if (currentRecordMode == RecordingMode.MANUAL || currentRecordMode == RecordingMode.AUTO_RECORDING) {
+            currentRecordMode = RecordingMode.AUTO_IDLE
+            isRecording = false
+            hasUserStoppedRecording = false
+
+            btnRecord.text = if (isGerman()) "🤖 Auto-Modus (Stand)" else "🤖 Auto-Mode (Idle)"
+            bgDrawable.setColor("#0D47A1".toColorInt())
+
+            android.widget.Toast.makeText(this, if (isGerman()) "Automatik-Modus aktiviert (> 7 km/h)" else "Auto mode activated", android.widget.Toast.LENGTH_SHORT).show()
+        } else {
+            currentRecordMode = RecordingMode.MANUAL
+            isRecording = false
+
+            btnRecord.text = if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record"
+            bgDrawable.setColor("#222222".toColorInt())
+
+            android.widget.Toast.makeText(this, if (isGerman()) "Manueller Modus" else "Manual mode", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun checkAutoStartCondition() {
+        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && currentSpeedKmH > 7.0) {
+            isRecording = true
+            recordedEntries.clear()
+            currentRecordMode = RecordingMode.AUTO_RECORDING
+
+            handler.post {
+                btnRecord.text = if (isGerman()) "🔴 Auto: Läuft" else "🔴 Auto: Running"
+                val bgDrawable = btnRecord.background as GradientDrawable
+                bgDrawable.setColor("#B71C1C".toColorInt())
+
+                tvStatus.text = if (isGerman()) "Auto-Aufzeichnung läuft (>7km/h)" else "Auto-recording..."
+                tvStatus.setTextColor("#00E676".toColorInt())
+            }
+        }
+    }
+
+    private fun showSaveDialog() {
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", java.util.Locale.getDefault())
+        val defaultFileName = dateFormat.format(java.util.Date())
+
+        val input = android.widget.EditText(this).apply {
+            setText(defaultFileName)
+            setSelection(text.length)
+            setTextColor(Color.WHITE)
+            setBackgroundColor("#222222".toColorInt())
+
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(50, 20, 50, 20)
+            }
+            setPadding(40, 30, 40, 30)
+        }
+
+        val container = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            addView(input)
+        }
+
+        android.app.AlertDialog.Builder(this)
+            .setTitle(if (isGerman()) "Tour speichern" else "Save Tour")
+            .setMessage(if (isGerman()) "Dateinamen eingeben:" else "Enter file name:")
+            .setView(container)
+            .setPositiveButton(if (isGerman()) "Speichern" else "Save") { _, _ ->
+                val fileName = input.text.toString().trim()
+                saveTourToCsv(fileName.ifEmpty { defaultFileName })
+                isRecording = false
+                hasUserStoppedRecording = true
+            }
+            .setNegativeButton(if (isGerman()) "Abbrechen" else "Cancel", null)
+            .show()
+    }
+
+    private fun saveTourToCsv(fileName: String) {
+        try {
+            val csvHeader = "Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude\n"
+            val csvContent = StringBuilder(csvHeader)
+
+            for (entry in recordedEntries) {
+                csvContent.append("${entry.timestamp};${entry.leanAngleLeft};${entry.leanAngleRight};${entry.acceleration};${entry.braking};${entry.lat};${entry.lon}\n")
+            }
+
+            val finalFileName = if (fileName.endsWith(".csv")) fileName else "$fileName.csv"
+            val fileContentBytes = csvContent.toString().toByteArray(Charsets.UTF_8)
+
+            var fileUri: android.net.Uri? = null
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                val resolver = contentResolver
+                val contentValues = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, finalFileName)
+                    put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "text/csv")
+                    put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+                }
+
+                val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { outputStream ->
+                        outputStream.write(fileContentBytes)
+                    }
+                    fileUri = uri
+                }
+            } else {
+                val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) downloadsDir.mkdirs()
+                val file = java.io.File(downloadsDir, finalFileName)
+                file.writeText(csvContent.toString())
+                fileUri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
+            }
+
+            android.widget.Toast.makeText(this, if (isGerman()) "Im Download-Ordner gespeichert!" else "Saved to Downloads!", android.widget.Toast.LENGTH_LONG).show()
+
+            if (fileUri != null) {
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "text/csv"
+                    putExtra(android.content.Intent.EXTRA_STREAM, fileUri)
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(android.content.Intent.createChooser(shareIntent, if (isGerman()) "Tour teilen via" else "Share tour via"))
+            }
+
+        } catch (e: Exception) {
+            e.printStackTrace()
+            android.widget.Toast.makeText(this, if (isGerman()) "Fehler beim Speichern!" else "Error saving file!", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun lockCurrentOrientation() {
@@ -423,11 +685,24 @@ class MainActivity : Activity(), SensorEventListener {
         linearAccelSensor?.let {
             sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
         }
+
+        try {
+            if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 2f, locationListener)
+            }
+        } catch (e: SecurityException) {
+            e.printStackTrace()
+        }
     }
 
     override fun onPause() {
         super.onPause()
         sensorManager.unregisterListener(this)
+        locationManager.removeUpdates(locationListener)
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {
+        // Wird hier nicht benötigt, muss aber implementiert werden
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
@@ -481,19 +756,41 @@ class MainActivity : Activity(), SensorEventListener {
             }
 
             if (newTempPeak) {
-                resetRunnable?.let { handler.removeCallbacks(it) }
-                resetRunnable = Runnable {
+                lastPeakLeanAngle = if (abs(maxTempLeft) > abs(maxTempRight)) maxTempLeft else maxTempRight
+
+                tempResetRunnable?.let { handler.removeCallbacks(it) }
+                tempResetRunnable = Runnable {
+                    if (isRecording && (abs(lastPeakLeanAngle) > 0.5 || maxAcceleration > 0.05 || abs(maxBraking) > 0.05)) {
+                        val leftVal = if (lastPeakLeanAngle < 0) abs(lastPeakLeanAngle) else 0.0
+                        val rightVal = if (lastPeakLeanAngle > 0) abs(lastPeakLeanAngle) else 0.0
+
+                        recordedEntries.add(
+                            TourLogEntry(
+                                timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()),
+                                leanAngleLeft = leftVal,
+                                leanAngleRight = rightVal,
+                                acceleration = maxAcceleration,
+                                braking = maxBraking,
+                                lat = currentLatitude,
+                                lon = currentLongitude
+                            )
+                        )
+                    }
+
                     maxTempLeft = 0.0
                     maxTempRight = 0.0
-                    gaugeView.updateData(finalAngle, 0.0, 0.0, maxTourLeft, maxTourRight)
+                    lastPeakLeanAngle = 0.0
+                    maxAcceleration = 0.0
+                    maxBraking = 0.0
+                    gaugeView.updateData(finalAngle, maxTempLeft, maxTempRight, maxTourLeft, maxTourRight)
                 }
-                handler.postDelayed(resetRunnable!!, 7000)
+                handler.postDelayed(tempResetRunnable!!, 7000)
             }
 
             gaugeView.updateData(finalAngle, maxTempLeft, maxTempRight, maxTourLeft, maxTourRight)
             tvMaxTour.text = String.format("Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg", abs(maxTourLeft), abs(maxTourRight), tourMaxAccel, abs(tourMaxBrake))
-        }
-        else if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
+
+        } else if (event.sensor.type == Sensor.TYPE_LINEAR_ACCELERATION) {
             val x = event.values[0]
             val y = event.values[1]
 
@@ -524,8 +821,28 @@ class MainActivity : Activity(), SensorEventListener {
             }
 
             if (newAccelPeak) {
+                val peakAccelToSave = maxAcceleration
+                val peakBrakeToSave = maxBraking
+
                 accelResetRunnable?.let { handler.removeCallbacks(it) }
                 accelResetRunnable = Runnable {
+                    if (isRecording && (abs(lastPeakLeanAngle) > 0.5 || peakAccelToSave > 0.05 || abs(peakBrakeToSave) > 0.05)) {
+                        val leftVal = if (lastPeakLeanAngle < 0) abs(lastPeakLeanAngle) else 0.0
+                        val rightVal = if (lastPeakLeanAngle > 0) abs(lastPeakLeanAngle) else 0.0
+
+                        recordedEntries.add(
+                            TourLogEntry(
+                                timestamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date()),
+                                leanAngleLeft = leftVal,
+                                leanAngleRight = rightVal,
+                                acceleration = peakAccelToSave,
+                                braking = peakBrakeToSave,
+                                lat = currentLatitude,
+                                lon = currentLongitude
+                            )
+                        )
+                    }
+
                     maxAcceleration = 0.0
                     maxBraking = 0.0
                     tvAccelLeft.text = String.format("Acc\n+0.00g")
@@ -539,6 +856,4 @@ class MainActivity : Activity(), SensorEventListener {
             tvMaxTour.text = String.format("Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg", abs(maxTourLeft), abs(maxTourRight), tourMaxAccel, abs(tourMaxBrake))
         }
     }
-
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
