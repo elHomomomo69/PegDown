@@ -59,6 +59,12 @@ class SensorProcessor(
     var currentLongitude = 0.0
     var currentSpeedKmH = 0.0
 
+    // Auto-Zero logic
+    private var straightDriveStartTime = 0L
+    private val autoZeroThresholdAngle = 2.0 // Grad
+    private val autoZeroMinSpeed = 40.0 // km/h
+    private val autoZeroDurationMs = 10000L // 10 Sekunden
+
     fun start() {
         sensorStartupCounter = 0
         gravitySensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
@@ -89,6 +95,23 @@ class SensorProcessor(
         accelResetRunnable?.let { handler.removeCallbacks(it) }
         tempResetRunnable?.let { handler.removeCallbacks(it) }
         notifyUpdates()
+    }
+
+    private fun checkAutoZero(currentAngle: Double) {
+        if ((currentSpeedKmH > autoZeroMinSpeed) && (abs(currentAngle) < autoZeroThresholdAngle)) {
+            if (straightDriveStartTime == 0L) {
+                straightDriveStartTime = System.currentTimeMillis()
+            } else {
+                val elapsed = System.currentTimeMillis() - straightDriveStartTime
+                if (elapsed > autoZeroDurationMs) {
+                    // Sanftes Nachjustieren: 0.1 Grad Korrektur pro Update
+                    calibrationOffset += (currentAngle * 0.01)
+                    // Wir setzen den Timer nicht zurück, um kontinuierlich sanft zu korrigieren
+                }
+            }
+        } else {
+            straightDriveStartTime = 0L
+        }
     }
 
     private fun notifyUpdates() {
@@ -143,6 +166,8 @@ class SensorProcessor(
 
         val calculatedAngle = smoothedTilt - calibrationOffset
         val finalAngle = kotlin.math.round(calculatedAngle / 0.1) * 0.1
+
+        checkAutoZero(finalAngle)
 
         if (finalAngle < maxTourLeft) maxTourLeft = finalAngle
         if (finalAngle > maxTourRight) maxTourRight = finalAngle

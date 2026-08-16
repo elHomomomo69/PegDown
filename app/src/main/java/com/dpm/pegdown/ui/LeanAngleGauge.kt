@@ -1,8 +1,5 @@
 package com.dpm.pegdown.ui
 
-import com.dpm.pegdown.R
-import android.annotation.SuppressLint
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -11,12 +8,15 @@ import android.graphics.RectF
 import android.graphics.drawable.BitmapDrawable
 import android.view.View
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.toColorInt
+import androidx.core.graphics.withTranslation
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
-import androidx.core.graphics.toColorInt
-import androidx.core.graphics.withTranslation
-import androidx.core.graphics.createBitmap
+import com.dpm.pegdown.R
+import android.content.Context
+import android.annotation.SuppressLint
 
 class LeanAngleGauge @JvmOverloads constructor(
     context: Context,

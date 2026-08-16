@@ -10,6 +10,7 @@ import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import com.dpm.pegdown.model.TourLogEntry
+import com.dpm.pegdown.util.PathSmoother
 import java.io.File
 import java.nio.charset.StandardCharsets
 import java.util.Locale
@@ -18,6 +19,9 @@ class TourExporter(private val context: Context) {
 
     fun saveTourToGpx(fileName: String, recordedEntries: List<TourLogEntry>) {
         try {
+            // Pfad-Glättung anwenden (Epsilon ca. 0.00001 für minimale Abweichung)
+            val smoothedEntries = PathSmoother.smoothPath(recordedEntries, 0.00001)
+
             val gpxHeader = """<?xml version="1.0" encoding="UTF-8" ?>
 <gpx version="1.1" creator="PegDownApp"
   xmlns="http://www.topografix.com/GPX/1/1"
@@ -32,7 +36,7 @@ class TourExporter(private val context: Context) {
 </gpx>"""
 
             val gpxContent = StringBuilder(gpxHeader)
-            for (entry in recordedEntries) {
+            for (entry in smoothedEntries) {
                 if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
 
                 val isoTime = entry.timestamp.replace(" ", "T") + "Z"
