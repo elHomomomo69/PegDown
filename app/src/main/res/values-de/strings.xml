@@ -1,0 +1,30 @@
+<resources>
+    <string name="tour_max_format">Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg</string>
+    <string name="calibrated_format">Kalibriert (%.1f°)</string>
+    <string name="not_calibrated">Nicht kalibriert</string>
+    <string name="acc_label">Acc</string>
+    <string name="acc_format">Acc\n+%.2fg</string>
+    <string name="brake_label">Bremse</string>
+    <string name="brake_format">Brake\n%.2fg</string>
+    <string name="speed_format">%.0f km/h</string>
+    <string name="btn_lock_view">Ansicht fixieren</string>
+    <string name="btn_locked">GESPERRT</string>
+    <string name="btn_axis_normal">Achsen: Normal</string>
+    <string name="btn_axis_inverted">Achsen: Invertiert</string>
+    <string name="btn_reset_tour">Tour Reset</string>
+    <string name="btn_instructions">💡 Anleitung</string>
+    <string name="btn_record">⏺ Aufzeichnung</string>
+    <string name="recording_active">Aufzeichnung aktiv</string>
+    <string name="status_recording">🔴 Aufz. läuft</string>
+    <string name="status_auto_idle">🤖 Auto-Modus (Stand)</string>
+    <string name="status_auto_running">🔴 Auto: Läuft</string>
+    <string name="toast_auto_mode">Automatik-Modus aktiviert (> 7 km/h)</string>
+    <string name="toast_manual_mode">Manueller Modus</string>
+    <string name="auto_recording_status">Auto-Aufzeichnung läuft (>7km/h)</string>
+    <string name="save_tour_title">Tour speichern</string>
+    <string name="save_tour_msg">Dateinamen eingeben:</string>
+    <string name="btn_save">Speichern</string>
+    <string name="btn_cancel">Abbrechen</string>
+    <string name="instructions_title">Gebrauchsanweisung</string>
+    <string name="instructions_msg">1. Hauptansicht (Gauge)\nDie Schräglagenanzeige zeigt den aktuellen Winkel in Echtzeit.\n- Grün (bis 20°): Entspannte Schräglage.\n- Gelb (20°-35°): Sportliche Schräglage.\n- Rot (über 35°): Ambitionierte Schräglage.\n- Gelbe Marker (oben): Spitzenwert der aktuellen Kurve (Reset nach 7s).\n- Blaue Marker (unten): Absoluter Höchstwert der gesamten Tour.\n\n2. Kalibrierung\nHandy sicher in der Halterung fixieren und einmal auf die große Gauge tippen, um den aktuellen Winkel als Nullpunkt (0°) zu setzen. Status oben links prüfen.\n\n3. Funktionstasten\n- Lock View: Fixiert die Orientierung (Hoch/Quer), damit das Display bei Schräglage nicht springt.\n- Achsen: Kehrt die Wirkungsrichtung der Schräglage um, falls das Handy \"falsch herum\" montiert ist.\n- Tour Reset: Setzt alle Maximalwerte (Winkel, G-Kräfte) der aktuellen Tour zurück.\n\n4. Aufzeichnung\n- Manueller Modus: Tippe auf ⏺ Aufzeichnung.\n- Auto-Modus: Halte ⏺ Aufzeichnung lange gedrückt. Die Aufnahme startet automatisch ab 7 km/h.\n\n5. Daten &amp; Export\nBeendete Touren werden als GPX-Datei im Download-Ordner gespeichert. Diese Datei ist optimiert für Calimoto und andere Karten-Viewer.\n\nSicherheit zuerst: Bedienen Sie die App niemals während der Fahrt!</string>
+</resources>

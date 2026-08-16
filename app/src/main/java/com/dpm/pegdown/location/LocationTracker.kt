@@ -8,7 +8,7 @@ import com.google.android.gms.location.*
 
 class LocationTracker(
     private val context: Context,
-    private val listener: LocationUpdateListener
+    private val listener: LocationUpdateListener,
 ) {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
     private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)

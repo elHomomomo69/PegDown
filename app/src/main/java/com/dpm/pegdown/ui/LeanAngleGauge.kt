@@ -21,7 +21,7 @@ import androidx.core.graphics.createBitmap
 class LeanAngleGauge @JvmOverloads constructor(
     context: Context,
     attrs: android.util.AttributeSet? = null,
-    defStyleAttr: Int = 0
+    defStyleAttr: Int = 0,
 ) : View(context, attrs, defStyleAttr) {
 
     private var currentAngle = 0.0
@@ -50,7 +50,7 @@ class LeanAngleGauge @JvmOverloads constructor(
                 bitmap
             }
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
         null
     }
 
@@ -95,7 +95,12 @@ class LeanAngleGauge @JvmOverloads constructor(
         val centerY = if (isLandscape) height * 0.95f else height * 0.52f
 
         val maxScale = 60.0
-        rectF.set(centerX - radius, centerY - radius, centerX + radius, centerY + radius)
+        rectF.apply {
+            left = centerX - radius
+            top = centerY - radius
+            right = centerX + radius
+            bottom = centerY + radius
+        }
 
         // --- 1. HINTERGRUND-BOGEN (Insgesamt 120 Grad, von 210° bis 330°) ---
         paint.style = Paint.Style.STROKE
@@ -140,7 +145,7 @@ class LeanAngleGauge @JvmOverloads constructor(
         paint.strokeCap = Paint.Cap.BUTT
         paint.color = "#DDDDDD".toColorInt()
 
-        for (angle in -60..60 step 15) {
+        for (angle in (-60..60 step 15)) {
             val degInCanvas = 270.0 + angle
             val rad = Math.toRadians(degInCanvas)
             val innerR = radius - halfStroke
@@ -204,10 +209,10 @@ class LeanAngleGauge @JvmOverloads constructor(
             canvas.drawPath(markerPath, paint)
         }
 
-        drawTriangleMarker(maxTourLeft, "#00B0FF".toColorInt(), false)
-        drawTriangleMarker(maxTourRight, "#00B0FF".toColorInt(), false)
-        drawTriangleMarker(maxTempLeft, "#FFAB00".toColorInt(), true)
-        drawTriangleMarker(maxTempRight, "#FFAB00".toColorInt(), true)
+        drawTriangleMarker(maxTourLeft, "#00B0FF".toColorInt(), isAbove = false)
+        drawTriangleMarker(maxTourRight, "#00B0FF".toColorInt(), isAbove = false)
+        drawTriangleMarker(maxTempLeft, "#FFAB00".toColorInt(), isAbove = true)
+        drawTriangleMarker(maxTempRight, "#FFAB00".toColorInt(), isAbove = true)
 
         // --- 3. FARBDEFINITION FÜR MOTORRAD & TEXT ---
         val absAngle = abs(currentAngle)
@@ -264,7 +269,7 @@ class LeanAngleGauge @JvmOverloads constructor(
         val fontMetrics = paint.fontMetrics
         val textY = circleCenterY - (fontMetrics.ascent + fontMetrics.descent) / 2f
 
-        canvas.drawText(String.format("%.1f°", currentAngle), circleCenterX, textY, paint)
+        canvas.drawText(String.format(java.util.Locale.US, "%.1f°", currentAngle), circleCenterX, textY, paint)
         paint.isFakeBoldText = false
 
         // --- 6. SEPARATE LINKE & RECHTE KURVENWERTE ---
@@ -274,10 +279,10 @@ class LeanAngleGauge @JvmOverloads constructor(
 
         paint.textAlign = Paint.Align.LEFT
         val sideTextY = if (isLandscape) centerY - (radius * 0.15f) else centerY + (radius * 0.25f)
-        canvas.drawText(String.format("%.1f°", abs(maxTempLeft)), centerX - (radius * 0.75f), sideTextY, paint)
+        canvas.drawText(String.format(java.util.Locale.US, "%.1f°", abs(maxTempLeft)), centerX - (radius * 0.75f), sideTextY, paint)
 
         paint.textAlign = Paint.Align.RIGHT
-        canvas.drawText(String.format("%.1f°", abs(maxTempRight)), centerX + (radius * 0.75f), sideTextY, paint)
+        canvas.drawText(String.format(java.util.Locale.US, "%.1f°", abs(maxTempRight)), centerX + (radius * 0.75f), sideTextY, paint)
 
         paint.isFakeBoldText = false
     }

@@ -33,12 +33,16 @@ class TourExporter(private val context: Context) {
 
             val gpxContent = StringBuilder(gpxHeader)
             for (entry in recordedEntries) {
-                if (entry.lat == 0.0 && entry.lon == 0.0) continue
+                if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
 
                 val isoTime = entry.timestamp.replace(" ", "T") + "Z"
                 val desc = String.format(Locale.US,
                     "Lean: L %.1f R %.1f | Accel: %.2fg | Brake: %.2fg | Speed: %.1f kmh",
-                    entry.leanAngleLeft, entry.leanAngleRight, entry.acceleration, entry.braking, entry.speed
+                    entry.leanAngleLeft,
+                    entry.leanAngleRight,
+                    entry.acceleration,
+                    entry.braking,
+                    entry.speed,
                 )
 
                 val entryXml = String.format(Locale.US,

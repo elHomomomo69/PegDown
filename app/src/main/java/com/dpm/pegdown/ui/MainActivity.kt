@@ -17,6 +17,7 @@ import android.widget.TextView
 import androidx.core.graphics.toColorInt
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.dpm.pegdown.R
 import com.dpm.pegdown.data.TourExporter
 import com.dpm.pegdown.location.LocationTracker
 import com.dpm.pegdown.location.LocationUpdateListener
@@ -24,6 +25,8 @@ import com.dpm.pegdown.model.RecordingMode
 import com.dpm.pegdown.model.TourLogEntry
 import com.dpm.pegdown.sensor.SensorProcessor
 import com.dpm.pegdown.sensor.SensorUpdateListener
+import java.text.SimpleDateFormat
+import java.util.Locale
 import kotlin.math.abs
 
 class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
@@ -49,11 +52,6 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     private var currentRecordMode = RecordingMode.MANUAL
     private val recordedEntries = mutableListOf<TourLogEntry>()
     private val handler = Handler(Looper.getMainLooper())
-
-    private fun isGerman(): Boolean {
-        val locale = resources.configuration.locales[0]
-        return locale.language.equals("de", ignoreCase = true)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,10 +112,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             )
             setOnClickListener {
                 sensorProcessor.calibrate()
-                tvStatus.text = if (isGerman()) String.format(
-                    "Kalibriert (%.1f°)",
-                    sensorProcessor.calibrationOffset
-                ) else String.format("Calibrated (%.1f°)", sensorProcessor.calibrationOffset)
+                tvStatus.text = getString(R.string.calibrated_format, sensorProcessor.calibrationOffset)
                 tvStatus.setTextColor("#00E676".toColorInt())
             }
         }
@@ -148,8 +143,8 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         }
 
         btnLockView = createCornerButton(
-            if (isOrientationLocked) (if (isGerman()) "GESPERRT" else "LOCKED")
-            else (if (isGerman()) "Ansicht fixieren" else "Lock View"),
+            if (isOrientationLocked) getString(R.string.btn_locked)
+            else getString(R.string.btn_lock_view),
             if (isOrientationLocked) "#FF1744" else "#222222",
             8
         ).apply {
@@ -158,19 +153,19 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
                 val bgDrawable = background as GradientDrawable
                 if (isOrientationLocked) {
                     lockCurrentOrientation()
-                    text = if (isGerman()) "GESPERRT" else "LOCKED"
+                    text = getString(R.string.btn_locked)
                     bgDrawable.setColor("#FF1744".toColorInt())
                 } else {
                     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    text = if (isGerman()) "Ansicht fixieren" else "Lock View"
+                    text = getString(R.string.btn_lock_view)
                     bgDrawable.setColor("#222222".toColorInt())
                 }
             }
         }
 
         btnInvertAxis = createCornerButton(
-            if (manualInvert) (if (isGerman()) "Achsen: Invertiert" else "Axis: Inverted")
-            else (if (isGerman()) "Achsen: Normal" else "Axis: Normal"),
+            if (manualInvert) getString(R.string.btn_axis_inverted)
+            else getString(R.string.btn_axis_normal),
             if (manualInvert) "#FF9800" else "#222222",
             4
         ).apply {
@@ -179,17 +174,17 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
                 gaugeView.setInverted(manualInvert)
                 val bgDrawable = background as GradientDrawable
                 if (manualInvert) {
-                    text = if (isGerman()) "Achsen: Invertiert" else "Axis: Inverted"
+                    text = getString(R.string.btn_axis_inverted)
                     bgDrawable.setColor("#FF9800".toColorInt())
                 } else {
-                    text = if (isGerman()) "Achsen: Normal" else "Axis: Normal"
+                    text = getString(R.string.btn_axis_normal)
                     bgDrawable.setColor("#222222".toColorInt())
                 }
             }
         }
 
         val btnResetTour = createCornerButton(
-            if (isGerman()) "Tour Reset" else "Reset Tour",
+            getString(R.string.btn_reset_tour),
             "#222222",
             8
         ).apply {
@@ -199,7 +194,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         }
 
         btnInfo = createCornerButton(
-            if (isGerman()) "💡 Anleitung" else "💡 Instructions",
+            getString(R.string.btn_instructions),
             "#222222",
             8
         ).apply {
@@ -207,7 +202,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         }
 
         btnRecord = createCornerButton(
-            if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record",
+            getString(R.string.btn_record),
             "#222222",
             8
         ).apply {
@@ -227,11 +222,10 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         tvStatus = TextView(this).apply {
             textSize = 11f
             if (sensorProcessor.calibrationOffset != 0.0) {
-                text = if (isGerman()) String.format("Kalibriert (%.1f°)", sensorProcessor.calibrationOffset)
-                else String.format("Calibrated (%.1f°)", sensorProcessor.calibrationOffset)
+                text = getString(R.string.calibrated_format, sensorProcessor.calibrationOffset)
                 setTextColor("#00E676".toColorInt())
             } else {
-                text = if (isGerman()) "Nicht kalibriert" else "Not calibrated"
+                text = getString(R.string.not_calibrated)
                 setTextColor("#FF5252".toColorInt())
             }
             setPadding(0, 0, 0, 4)
@@ -261,7 +255,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
         tvAccelLeft = TextView(this).apply {
             textSize = if (isLandscape) 22f else 16f
-            text = "Acc\n+0.00g"
+            text = getString(R.string.acc_format, 0.0)
             setTextColor("#00E676".toColorInt())
             gravity = Gravity.CENTER
             setPadding(14, 8, 14, 8)
@@ -290,7 +284,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
         tvAccelRight = TextView(this).apply {
             textSize = if (isLandscape) 22f else 16f
-            text = "Brake\n0.00g"
+            text = getString(R.string.brake_format, 0.0)
             setTextColor("#FF3D00".toColorInt())
             gravity = Gravity.CENTER
             setPadding(14, 8, 14, 8)
@@ -353,7 +347,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
         tvSpeed = TextView(this).apply {
             textSize = if (isLandscape) 32f else 24f
-            text = "0 km/h"
+            text = getString(R.string.speed_format, 0.0)
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
             setPadding(20, 10, 20, 10)
@@ -379,8 +373,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     private fun updateTourMaxText() {
-        tvMaxTour.text = String.format(
-            "Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg",
+        tvMaxTour.text = getString(R.string.tour_max_format,
             abs(sensorProcessor.maxTourLeft),
             abs(sensorProcessor.maxTourRight),
             sensorProcessor.tourMaxAccel,
@@ -394,8 +387,8 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     override fun onAccelerationUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
-        tvAccelLeft.text = String.format("Acc\n+%.2fg", accel)
-        tvAccelRight.text = String.format("Brake\n%.2fg", abs(brake))
+        tvAccelLeft.text = getString(R.string.acc_format, accel)
+        tvAccelRight.text = getString(R.string.brake_format, abs(brake))
         updateTourMaxText()
     }
 
@@ -409,7 +402,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         sensorProcessor.currentSpeedKmH = speedKmH
         
         handler.post {
-            tvSpeed.text = String.format("%.0f km/h", speedKmH)
+            tvSpeed.text = getString(R.string.speed_format, speedKmH)
         }
         checkAutoStartCondition(speedKmH)
     }
@@ -420,26 +413,26 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             RecordingMode.MANUAL -> {
                 if (!isRecording) {
                     startRecording()
-                    btnRecord.text = if (isGerman()) "🔴 Aufz. läuft" else "🔴 Recording"
+                    btnRecord.text = getString(R.string.status_recording)
                     bgDrawable.setColor("#B71C1C".toColorInt())
-                    tvStatus.text = if (isGerman()) "Aufzeichnung aktiv" else "Recording active"
+                    tvStatus.text = getString(R.string.recording_active)
                     tvStatus.setTextColor("#00E676".toColorInt())
                 } else {
                     stopRecording()
-                    btnRecord.text = if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record"
+                    btnRecord.text = getString(R.string.btn_record)
                     bgDrawable.setColor("#222222".toColorInt())
                 }
             }
             RecordingMode.AUTO_IDLE -> {
                 startRecording()
                 currentRecordMode = RecordingMode.AUTO_RECORDING
-                btnRecord.text = if (isGerman()) "🔴 Auto: Läuft" else "🔴 Auto: Running"
+                btnRecord.text = getString(R.string.status_auto_running)
                 bgDrawable.setColor("#B71C1C".toColorInt())
             }
             RecordingMode.AUTO_RECORDING -> {
                 stopRecording()
                 currentRecordMode = RecordingMode.AUTO_IDLE
-                btnRecord.text = if (isGerman()) "🤖 Auto-Modus (Stand)" else "🤖 Auto-Mode (Idle)"
+                btnRecord.text = getString(R.string.status_auto_idle)
                 bgDrawable.setColor("#0D47A1".toColorInt())
             }
         }
@@ -463,14 +456,16 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             currentRecordMode = RecordingMode.AUTO_IDLE
             isRecording = false
             sensorProcessor.isRecording = false
-            btnRecord.text = if (isGerman()) "🤖 Auto-Modus (Stand)" else "🤖 Auto-Mode (Idle)"
+            btnRecord.text = getString(R.string.status_auto_idle)
             bgDrawable.setColor("#0D47A1".toColorInt())
+            android.widget.Toast.makeText(this, getString(R.string.toast_auto_mode), android.widget.Toast.LENGTH_SHORT).show()
         } else {
             currentRecordMode = RecordingMode.MANUAL
             isRecording = false
             sensorProcessor.isRecording = false
-            btnRecord.text = if (isGerman()) "⏺ Aufzeichnung" else "⏺ Record"
+            btnRecord.text = getString(R.string.btn_record)
             bgDrawable.setColor("#222222".toColorInt())
+            android.widget.Toast.makeText(this, getString(R.string.toast_manual_mode), android.widget.Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -479,16 +474,16 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             startRecording()
             currentRecordMode = RecordingMode.AUTO_RECORDING
             handler.post {
-                btnRecord.text = if (isGerman()) "🔴 Auto: Läuft" else "🔴 Auto: Running"
+                btnRecord.text = getString(R.string.status_auto_running)
                 (btnRecord.background as GradientDrawable).setColor("#B71C1C".toColorInt())
-                tvStatus.text = if (isGerman()) "Auto-Aufzeichnung läuft (>7km/h)" else "Auto-recording..."
+                tvStatus.text = getString(R.string.auto_recording_status)
                 tvStatus.setTextColor("#00E676".toColorInt())
             }
         }
     }
 
     private fun showSaveDialog() {
-        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd_HH-mm", java.util.Locale.getDefault())
+        val dateFormat = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
         val defaultFileName = dateFormat.format(java.util.Date())
         val input = android.widget.EditText(this).apply {
             setText(defaultFileName)
@@ -496,78 +491,25 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             setBackgroundColor("#222222".toColorInt())
             setPadding(40, 30, 40, 30)
         }
-        val container = android.widget.LinearLayout(this).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             addView(input)
         }
         android.app.AlertDialog.Builder(this)
-            .setTitle(if (isGerman()) "Tour speichern" else "Save Tour")
+            .setTitle(getString(R.string.save_tour_title))
+            .setMessage(getString(R.string.save_tour_msg))
             .setView(container)
-            .setPositiveButton(if (isGerman()) "Speichern" else "Save") { _, _ ->
+            .setPositiveButton(getString(R.string.btn_save)) { _, _ ->
                 val fileName = input.text.toString().trim().ifEmpty { defaultFileName }
                 tourExporter.saveTourToGpx(fileName, recordedEntries)
             }
-            .setNegativeButton(if (isGerman()) "Abbrechen" else "Cancel", null)
+            .setNegativeButton(getString(R.string.btn_cancel), null)
             .show()
     }
 
     private fun showInstructionsDialog() {
-        val title = if (isGerman()) "Gebrauchsanweisung" else "Instructions"
-        val message = if (isGerman()) {
-            """
-            1. Hauptansicht (Gauge)
-            Die Schräglagenanzeige zeigt den aktuellen Winkel in Echtzeit.
-            - Grün (bis 20°): Entspannte Schräglage.
-            - Gelb (20°-35°): Sportliche Schräglage.
-            - Rot (über 35°): Ambitionierte Schräglage.
-            - Gelbe Marker (oben): Spitzenwert der aktuellen Kurve (Reset nach 7s).
-            - Blaue Marker (unten): Absoluter Höchstwert der gesamten Tour.
-
-            2. Kalibrierung
-            Handy sicher in der Halterung fixieren und einmal auf die große Gauge tippen, um den aktuellen Winkel als Nullpunkt (0°) zu setzen. Status oben links prüfen.
-
-            3. Funktionstasten
-            - Lock View: Fixiert die Orientierung (Hoch/Quer), damit das Display bei Schräglage nicht springt.
-            - Achsen: Kehrt die Wirkungsrichtung der Schräglage um, falls das Handy "falsch herum" montiert ist.
-            - Tour Reset: Setzt alle Maximalwerte (Winkel, G-Kräfte) der aktuellen Tour zurück.
-
-            4. Aufzeichnung
-            - Manueller Modus: Tippe auf ⏺ Aufzeichnung.
-            - Auto-Modus: Halte ⏺ Aufzeichnung lange gedrückt. Die Aufnahme startet automatisch ab 7 km/h.
-
-            5. Daten & Export
-            Beendete Touren werden als GPX-Datei im Download-Ordner gespeichert. Diese Datei ist optimiert für Calimoto und andere Karten-Viewer.
-
-            Sicherheit zuerst: Bedienen Sie die App niemals während der Fahrt!
-            """.trimIndent()
-        } else {
-            """
-            1. Main View (Gauge)
-            Shows your current lean angle in real-time.
-            - Green (up to 20°): Relaxed lean.
-            - Yellow (20°-35°): Sporty lean.
-            - Red (over 35°): Ambitious lean.
-            - Yellow markers (top): Peak of the current curve (resets after 7s).
-            - Blue markers (bottom): Absolute peak of the entire tour.
-
-            2. Calibration
-            Fix the phone securely in its mount and tap the large gauge once to set the current angle as zero (0°). Check the status in the top left.
-
-            3. Controls
-            - Lock View: Prevents the screen from rotating during lean, keeping your preferred orientation (Portrait/Landscape).
-            - Axis: Reverses the lean direction if the phone is mounted "upside down".
-            - Tour Reset: Resets all maximum values (Angle, G-forces) for the current tour.
-
-            4. Recording
-            - Manual Mode: Tap ⏺ Record to start/stop.
-            - Auto Mode: Long press ⏺ Record. Recording starts automatically when speed exceeds 7 km/h.
-
-            5. Data & Export
-            Finished tours are saved as GPX files in your Downloads folder. The format is optimized for Calimoto and other map viewers.
-
-            Safety first: Never operate the app while riding!
-            """.trimIndent()
-        }
+        val title = getString(R.string.instructions_title)
+        val message = getString(R.string.instructions_msg)
         val textView = TextView(this).apply {
             text = message
             textSize = 14f

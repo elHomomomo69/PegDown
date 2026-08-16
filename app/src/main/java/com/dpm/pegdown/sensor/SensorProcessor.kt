@@ -18,7 +18,7 @@ import kotlin.math.sqrt
 
 class SensorProcessor(
     private val context: Context,
-    private val listener: SensorUpdateListener
+    private val listener: SensorUpdateListener,
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -125,7 +125,7 @@ class SensorProcessor(
 
         val newRawTilt = if (isLandscape) {
             val invertSign = if (rotation == Surface.ROTATION_270) 1.0 else -1.0
-            Math.toDegrees(atan2((-y * invertSign), sqrt((x * x + z * z).toDouble())))
+            Math.toDegrees(atan2((-y * invertSign), sqrt(((x * x) + (z * z)).toDouble())))
         } else {
             Math.toDegrees(atan2(-x.toDouble(), sqrt((y * y + z * z).toDouble())))
         }
@@ -134,7 +134,7 @@ class SensorProcessor(
             smoothedTilt = newRawTilt
             sensorStartupCounter++
         } else {
-            smoothedTilt = smoothedTilt + alpha * (newRawTilt - smoothedTilt)
+            smoothedTilt += alpha * (newRawTilt - smoothedTilt)
         }
         rawTilt = newRawTilt
 

@@ -1,3 +1,31 @@
 <resources>
     <string name="app_name">PegDown</string>
+    <string name="tour_max_format">Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg</string>
+    <string name="calibrated_format">Calibrated (%.1f°)</string>
+    <string name="not_calibrated">Not calibrated</string>
+    <string name="acc_label">Acc</string>
+    <string name="acc_format">Acc\n+%.2fg</string>
+    <string name="brake_label">Brake</string>
+    <string name="brake_format">Brake\n%.2fg</string>
+    <string name="speed_format">%.0f km/h</string>
+    <string name="btn_lock_view">Lock View</string>
+    <string name="btn_locked">LOCKED</string>
+    <string name="btn_axis_normal">Axis: Normal</string>
+    <string name="btn_axis_inverted">Axis: Inverted</string>
+    <string name="btn_reset_tour">Reset Tour</string>
+    <string name="btn_instructions">💡 Instructions</string>
+    <string name="btn_record">⏺ Record</string>
+    <string name="recording_active">Recording active</string>
+    <string name="status_recording">🔴 Recording</string>
+    <string name="status_auto_idle">🤖 Auto-Mode (Idle)</string>
+    <string name="status_auto_running">🔴 Auto: Running</string>
+    <string name="toast_auto_mode">Auto mode activated</string>
+    <string name="toast_manual_mode">Manual mode</string>
+    <string name="auto_recording_status">Auto-recording...</string>
+    <string name="save_tour_title">Save Tour</string>
+    <string name="save_tour_msg">Enter file name:</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="instructions_title">Instructions</string>
+    <string name="instructions_msg">1. Main View (Gauge)\nShows your current lean angle in real-time.\n- Green (up to 20°): Relaxed lean.\n- Yellow (20°-35°): Sporty lean.\n- Red (over 35°): Ambitious lean.\n- Yellow markers (top): Peak of the current curve (resets after 7s).\n- Blue markers (bottom): Absolute peak of the entire tour.\n\n2. Calibration\nFix the phone securely in its mount and tap the large gauge once to set the current angle as zero (0°). Check the status in the top left.\n\n3. Controls\n- Lock View: Prevents the screen from rotating during lean, keeping your preferred orientation (Portrait/Landscape).\n- Axis: Reverses the lean direction if the phone is mounted \"upside down\".\n- Tour Reset: Resets all maximum values (Angle, G-forces) for the current tour.\n\n4. Recording\n- Manual Mode: Tap ⏺ Record to start/stop.\n- Auto Mode: Long press ⏺ Record. Recording starts automatically when speed exceeds 7 km/h.\n\n5. Data &amp; Export\nFinished tours are saved as GPX files in your Downloads folder. The format is optimized for Calimoto and other map viewers.\n\nSafety first: Never operate the app while riding!</string>
 </resources>
