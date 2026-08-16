@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">Die App startet direkt in der zuletzt fixierten Bildschirm-Ausrichtung.</string>
     <string name="setting_invert_axis">Achsen invertieren</string>
     <string name="desc_invert_axis">Vertauscht die linke und rechte Schräglagen-Richtung in der Anzeige.</string>
+    <string name="setting_export_format">Export-Format</string>
+    <string name="desc_export_format">Wähle zwischen GPX (Standard) und CSV (Excel-freundlich).</string>
     <string name="setting_language">Sprache</string>
     <string name="desc_language">Aktuell: %s</string>
     <string name="lang_auto">Systemstandard (Auto)</string>

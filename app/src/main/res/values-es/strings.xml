@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">La app iniciará en la última orientación bloqueada.</string>
     <string name="setting_invert_axis">Invertir ejes</string>
     <string name="desc_invert_axis">Intercambia la dirección de inclinación izquierda y derecha.</string>
+    <string name="setting_export_format">Formato de Exportación</string>
+    <string name="desc_export_format">Elige entre GPX (Estándar) y CSV (Apto para Excel).</string>
     <string name="setting_language">Idioma</string>
     <string name="desc_language">Actual: %s</string>
     <string name="lang_auto">Predeterminado (Auto)</string>

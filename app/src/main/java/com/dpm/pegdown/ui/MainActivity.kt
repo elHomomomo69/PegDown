@@ -22,6 +22,7 @@ import com.dpm.pegdown.data.SettingsManager
 import com.dpm.pegdown.data.TourExporter
 import com.dpm.pegdown.location.LocationTracker
 import com.dpm.pegdown.location.LocationUpdateListener
+import com.dpm.pegdown.model.ExportFormat
 import com.dpm.pegdown.model.RecordingMode
 import com.dpm.pegdown.model.TourLogEntry
 import com.dpm.pegdown.sensor.SensorProcessor
@@ -538,7 +539,11 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             .setView(container)
             .setPositiveButton(getString(R.string.btn_save)) { _, _ ->
                 val fileName = input.text.toString().trim().ifEmpty { defaultFileName }
-                tourExporter.saveTourToGpx(fileName, recordedEntries)
+                if (settingsManager.exportFormat == ExportFormat.GPX) {
+                    tourExporter.saveTourToGpx(fileName, recordedEntries)
+                } else {
+                    tourExporter.saveTourToCsv(fileName, recordedEntries)
+                }
             }
             .setNegativeButton(getString(R.string.btn_cancel), null)
             .show()

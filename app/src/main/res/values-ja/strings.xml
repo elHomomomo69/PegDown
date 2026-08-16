@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">前回固定した画面の向きでアプリが起動します。</string>
     <string name="setting_invert_axis">軸を反転</string>
     <string name="desc_invert_axis">ゲージの左右のバンク方向を入れ替えます。</string>
+    <string name="setting_export_format">出力形式</string>
+    <string name="desc_export_format">GPX（標準）とCSV（Excel対応）から選択します。</string>
     <string name="setting_language">言語</string>
     <string name="desc_language">現在：%s</string>
     <string name="lang_auto">システムデフォルト (Auto)</string>

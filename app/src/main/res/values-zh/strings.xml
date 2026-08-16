@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">应用将以您上次锁定的方向启动。</string>
     <string name="setting_invert_axis">反转倾角轴</string>
     <string name="desc_invert_axis">交换仪表上的左右倾斜方向。</string>
+    <string name="setting_export_format">导出格式</string>
+    <string name="desc_export_format">在 GPX（标准）和 CSV（Excel 友好型）之间选择。</string>
     <string name="setting_language">语言</string>
     <string name="desc_language">当前: %s</string>
     <string name="lang_auto">系统默认 (自动)</string>

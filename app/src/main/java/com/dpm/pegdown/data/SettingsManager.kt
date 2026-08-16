@@ -3,6 +3,7 @@ package com.dpm.pegdown.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import com.dpm.pegdown.model.ExportFormat
 import com.dpm.pegdown.model.RecordingMode
 
 class SettingsManager(context: Context) {
@@ -17,7 +18,15 @@ class SettingsManager(context: Context) {
         const val KEY_SMOOTHING_FACTOR = "smoothing_factor"
         const val KEY_INVERT_AXIS = "invert_axis"
         const val KEY_LANGUAGE = "selected_language"
+        const val KEY_EXPORT_FORMAT = "export_format"
     }
+
+    var exportFormat: ExportFormat
+        get() {
+            val formatStr = prefs.getString(KEY_EXPORT_FORMAT, ExportFormat.GPX.name)
+            return try { ExportFormat.valueOf(formatStr!!) } catch (_: Exception) { ExportFormat.GPX }
+        }
+        set(value) = prefs.edit { putString(KEY_EXPORT_FORMAT, value.name) }
 
     var selectedLanguage: String
         get() = prefs.getString(KEY_LANGUAGE, "auto") ?: "auto"

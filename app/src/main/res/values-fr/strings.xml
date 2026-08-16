@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">L\'app démarrera dans la dernière orientation verrouillée.</string>
     <string name="setting_invert_axis">Inverser les axes</string>
     <string name="desc_invert_axis">Inverse la direction d\'inclinaison gauche et droite.</string>
+    <string name="setting_export_format">Format d\'Exportation</string>
+    <string name="desc_export_format">Choisissez entre GPX (Standard) et CSV (Compatible Excel).</string>
     <string name="setting_language">Langue</string>
     <string name="desc_language">Actuel : %s</string>
     <string name="lang_auto">Par défaut (Auto)</string>

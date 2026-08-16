@@ -43,6 +43,8 @@
     <string name="desc_save_orientation">App will start in your last locked screen orientation.</string>
     <string name="setting_invert_axis">Invert Lean Axis</string>
     <string name="desc_invert_axis">Swaps left and right lean direction on the gauge.</string>
+    <string name="setting_export_format">Export Format</string>
+    <string name="desc_export_format">Choose between GPX (Standard) and CSV (Excel-friendly).</string>
     <string name="setting_language">Language</string>
     <string name="desc_language">Currently: %s</string>
     <string name="lang_auto">System Default (Auto)</string>

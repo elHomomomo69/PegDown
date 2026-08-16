@@ -42,6 +42,8 @@
     <string name="desc_save_orientation">Aplikacja uruchomi się w ostatnio zablokowanej orientacji.</string>
     <string name="setting_invert_axis">Odwróć osie pochylenia</string>
     <string name="desc_invert_axis">Zamienia kierunek pochylenia lewo/prawo na wskaźniku.</string>
+    <string name="setting_export_format">Format Eksportu</string>
+    <string name="desc_export_format">Wybierz między GPX (Standard) a CSV (Przyjazny dla Excela).</string>
     <string name="setting_language">Język</string>
     <string name="desc_language">Obecnie: %s</string>
     <string name="lang_auto">Domyślny (Auto)</string>

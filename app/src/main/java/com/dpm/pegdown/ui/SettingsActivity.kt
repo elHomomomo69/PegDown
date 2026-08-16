@@ -12,6 +12,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.dpm.pegdown.R
 import com.dpm.pegdown.data.SettingsManager
+import com.dpm.pegdown.model.ExportFormat
 import com.dpm.pegdown.model.RecordingMode
 import com.dpm.pegdown.util.LocaleHelper
 
@@ -143,7 +144,32 @@ class SettingsActivity : Activity() {
         }
         container.addView(rgMode)
 
-        // 5. Invert Axis
+        // 5. Export Format
+        container.addView(createLabel(getString(R.string.setting_export_format)))
+        container.addView(createDesc(getString(R.string.desc_export_format)))
+        val rgExport = RadioGroup(this).apply {
+            orientation = RadioGroup.HORIZONTAL
+            setPadding(0, 10, 0, 40)
+        }
+        val rbGpx = RadioButton(this).apply {
+            text = "GPX"
+            setTextColor(Color.WHITE)
+            id = View.generateViewId()
+        }
+        val rbCsv = RadioButton(this).apply {
+            text = "CSV"
+            setTextColor(Color.WHITE)
+            id = View.generateViewId()
+        }
+        rgExport.addView(rbGpx)
+        rgExport.addView(rbCsv)
+        if (settingsManager.exportFormat == ExportFormat.GPX) rbGpx.isChecked = true else rbCsv.isChecked = true
+        rgExport.setOnCheckedChangeListener { _, checkedId ->
+            settingsManager.exportFormat = if (checkedId == rbGpx.id) ExportFormat.GPX else ExportFormat.CSV
+        }
+        container.addView(rgExport)
+
+        // 6. Invert Axis
         val invertContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
