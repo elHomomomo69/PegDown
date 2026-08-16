@@ -390,7 +390,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
     override fun onLeanAngleUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastUIUpdateTime > 33) {
+        if (now - lastUIUpdateTime > 16) {
             gaugeView.updateData(current, tempL, tempR, tourL, tourR)
             updateTourMaxText()
             lastUIUpdateTime = now
@@ -399,7 +399,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
     override fun onAccelerationUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastUIUpdateTime > 33) {
+        if (now - lastUIUpdateTime > 16) {
             tvAccelLeft.text = getString(R.string.acc_format, accel)
             tvAccelRight.text = getString(R.string.brake_format, abs(brake))
             updateTourMaxText()
