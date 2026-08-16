@@ -152,12 +152,12 @@ class SettingsActivity : Activity() {
             setPadding(0, 10, 0, 40)
         }
         val rbGpx = RadioButton(this).apply {
-            text = "GPX"
+            text = getString(R.string.format_gpx)
             setTextColor(Color.WHITE)
             id = View.generateViewId()
         }
         val rbCsv = RadioButton(this).apply {
-            text = "CSV"
+            text = getString(R.string.format_csv)
             setTextColor(Color.WHITE)
             id = View.generateViewId()
         }

@@ -45,6 +45,8 @@
     <string name="desc_invert_axis">Swaps left and right lean direction on the gauge.</string>
     <string name="setting_export_format">Export Format</string>
     <string name="desc_export_format">Choose between GPX (Standard) and CSV (Excel-friendly).</string>
+    <string name="format_gpx" translatable="false">GPX</string>
+    <string name="format_csv" translatable="false">CSV</string>
     <string name="setting_language">Language</string>
     <string name="desc_language">Currently: %s</string>
     <string name="lang_auto">System Default (Auto)</string>
