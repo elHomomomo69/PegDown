@@ -30,7 +30,7 @@ class SettingsActivity : Activity() {
         settingsManager = SettingsManager(this)
 
         val root = ScrollView(this).apply {
-            setBackgroundColor("#080808".toColorInt())
+            setBackgroundColor("#000000".toColorInt())
             isFillViewport = true
         }
 

@@ -61,6 +61,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     private var currentRecordMode = RecordingMode.MANUAL
     private val recordedEntries = mutableListOf<TourLogEntry>()
     private val handler = Handler(Looper.getMainLooper())
+    private var lastUIUpdateTime = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,7 +110,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
     private fun setupUI() {
         val rootLayout = FrameLayout(this).apply {
-            setBackgroundColor("#080808".toColorInt())
+            setBackgroundColor("#000000".toColorInt())
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -388,14 +389,22 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     override fun onLeanAngleUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
-        gaugeView.updateData(current, tempL, tempR, tourL, tourR)
-        updateTourMaxText()
+        val now = System.currentTimeMillis()
+        if (now - lastUIUpdateTime > 33) {
+            gaugeView.updateData(current, tempL, tempR, tourL, tourR)
+            updateTourMaxText()
+            lastUIUpdateTime = now
+        }
     }
 
     override fun onAccelerationUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
-        tvAccelLeft.text = getString(R.string.acc_format, accel)
-        tvAccelRight.text = getString(R.string.brake_format, abs(brake))
-        updateTourMaxText()
+        val now = System.currentTimeMillis()
+        if (now - lastUIUpdateTime > 33) {
+            tvAccelLeft.text = getString(R.string.acc_format, accel)
+            tvAccelRight.text = getString(R.string.brake_format, abs(brake))
+            updateTourMaxText()
+            lastUIUpdateTime = now
+        }
     }
 
     override fun onPeakRecorded(entry: TourLogEntry) {

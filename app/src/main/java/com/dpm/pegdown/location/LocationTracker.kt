@@ -29,7 +29,7 @@ class LocationTracker(
             ) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    1000L,
+                    2000L, // Erhöht auf 2 Sekunden für Akku-Schonung
                     2f,
                     androidLocationListener,
                 )
@@ -38,9 +38,9 @@ class LocationTracker(
                 if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                     locationManager.requestLocationUpdates(
                         LocationManager.NETWORK_PROVIDER,
-                        1000L,
-                        2f,
-                        androidLocationListener
+                        5000L, // Network Fixes seltener
+                        10f,
+                        androidLocationListener,
                     )
                 }
             }
