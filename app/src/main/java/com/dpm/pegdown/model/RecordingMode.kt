@@ -1,4 +1,4 @@
-package com.dpm.pegdown
+package com.dpm.pegdown.model
 
 // Aufzeichnungs- und Automatik-Modus ---
 enum class RecordingMode {

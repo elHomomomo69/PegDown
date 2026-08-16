@@ -1,4 +1,4 @@
-package com.dpm.pegdown
+package com.dpm.pegdown.model
 
 // Datenklasse für gespeicherte Events (Peaks / Tour-Max)
 data class TourLogEntry(

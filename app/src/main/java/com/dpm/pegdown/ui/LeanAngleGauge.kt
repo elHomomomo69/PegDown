@@ -1,5 +1,6 @@
-package com.dpm.pegdown
+package com.dpm.pegdown.ui
 
+import com.dpm.pegdown.R
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
