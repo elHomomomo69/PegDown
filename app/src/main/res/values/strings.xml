@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">PegDown</string>
+    <string name="app_name" translatable="false">PegDown</string>
     <string name="tour_max_format">Tour Max — L: %.1f° | R: %.1f° | Acc: +%.2fg | Brake: %.2fg</string>
     <string name="calibrated_format">Calibrated (%.1f°)</string>
     <string name="not_calibrated">Not calibrated</string>
@@ -21,7 +21,7 @@
     <string name="status_auto_running">🔴 Auto: Running</string>
     <string name="toast_auto_mode">Auto mode activated</string>
     <string name="toast_manual_mode">Manual mode</string>
-    <string name="auto_recording_status">Auto-recording...</string>
+    <string name="auto_recording_status">Auto-recording…</string>
     <string name="save_tour_title">Save Tour</string>
     <string name="save_tour_msg">Enter file name:</string>
     <string name="btn_save">Save</string>
