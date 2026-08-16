@@ -46,7 +46,8 @@ class TourExporter(private val context: Context) {
                     entry.speed,
                 )
 
-                val entryXml = String.format(Locale.US,
+                val entryXml = String.format(
+                    Locale.US,
                     """      <trkpt lat="%.8f" lon="%.8f">
         <time>%s</time>
         <cmt>%s</cmt>

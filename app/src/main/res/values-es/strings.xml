@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">Auto-Inicio a: %.1f km/h</string>
     <string name="desc_auto_start_speed">Velocidad necesaria para iniciar la grabación automática.</string>
     <string name="setting_smoothing">Suavizado (Alpha)</string>
+    <string name="setting_smoothing_with_val">Suavizado (Alpha): %s</string>
     <string name="desc_smoothing">Bajo: Estable/Lento. Alto: Instantáneo/Rápido.</string>
     <string name="setting_default_mode">Grabación predeterminada</string>
     <string name="desc_default_mode">Elige si la app inicia en modo manual o automático.</string>

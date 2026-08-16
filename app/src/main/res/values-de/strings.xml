@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">Auto-Start ab: %.1f km/h</string>
     <string name="desc_auto_start_speed">Geschwindigkeit, ab der die automatische Aufzeichnung im Modus Auto-Bereit startet.</string>
     <string name="setting_smoothing">Anzeige-Dämpfung (Alpha)</string>
+    <string name="setting_smoothing_with_val">Anzeige-Dämpfung (Alpha): %s</string>
     <string name="desc_smoothing">Niedrig: Ruhige/Träge Anzeige. Hoch: Sofortige/Direkte Reaktion.</string>
     <string name="setting_default_mode">Standard Aufzeichnung</string>
     <string name="desc_default_mode">Wähle, ob die App im manuellen oder automatischen Modus startet.</string>

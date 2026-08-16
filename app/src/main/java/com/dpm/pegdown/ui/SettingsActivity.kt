@@ -45,32 +45,38 @@ class SettingsActivity : Activity() {
         }
 
         // Title
-        container.addView(TextView(this).apply {
-            text = getString(R.string.title_settings)
-            textSize = 24f
-            setTextColor(Color.WHITE)
-            setPadding(0, 0, 0, 40)
-        })
+        container.addView(
+            TextView(this).apply {
+                text = getString(R.string.title_settings)
+                textSize = 24f
+                setTextColor(Color.WHITE)
+                setPadding(0, 0, 0, 40)
+            },
+        )
 
         // 1. Reset Duration
         val tvResetLabel = createLabel(getString(R.string.setting_reset_duration, settingsManager.resetDurationSeconds))
         container.addView(tvResetLabel)
         container.addView(createDesc(getString(R.string.desc_reset_duration)))
-        container.addView(SeekBar(this).apply {
-            max = 30
-            min = 1
-            progress = settingsManager.resetDurationSeconds
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                    val valP = if (p < 1) 1 else p
-                    settingsManager.resetDurationSeconds = valP
-                    tvResetLabel.text = getString(R.string.setting_reset_duration, valP)
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
-            setPadding(0, 20, 0, 40)
-        })
+        container.addView(
+            SeekBar(this).apply {
+                max = 30
+                min = 1
+                progress = settingsManager.resetDurationSeconds
+                setOnSeekBarChangeListener(
+                    object : SeekBar.OnSeekBarChangeListener {
+                        override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
+                            val valP = if (p < 1) 1 else p
+                            settingsManager.resetDurationSeconds = valP
+                            tvResetLabel.text = getString(R.string.setting_reset_duration, valP)
+                        }
+                        override fun onStartTrackingTouch(s: SeekBar?) {}
+                        override fun onStopTrackingTouch(s: SeekBar?) {}
+                    },
+                )
+                setPadding(0, 20, 0, 40)
+            },
+        )
 
         // 2. Auto-Start Speed
         val tvSpeedLabel = createLabel(getString(R.string.setting_auto_start_speed, settingsManager.autoStartSpeedKmH))
@@ -93,7 +99,7 @@ class SettingsActivity : Activity() {
         })
 
         // 3. Smoothing
-        val tvSmoothLabel = createLabel("${getString(R.string.setting_smoothing)}: ${String.format(java.util.Locale.US, "%.2f", settingsManager.smoothingFactor)}")
+        val tvSmoothLabel = createLabel(getString(R.string.setting_smoothing_with_val, String.format(java.util.Locale.US, "%.2f", settingsManager.smoothingFactor)))
         container.addView(tvSmoothLabel)
         container.addView(createDesc(getString(R.string.desc_smoothing)))
         container.addView(SeekBar(this).apply {
@@ -104,7 +110,7 @@ class SettingsActivity : Activity() {
                 override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                     val valF = (if (p < 1) 1 else p) / 100f
                     settingsManager.smoothingFactor = valF
-                    tvSmoothLabel.text = "${getString(R.string.setting_smoothing)}: ${String.format(java.util.Locale.US, "%.2f", valF)}"
+                    tvSmoothLabel.text = getString(R.string.setting_smoothing_with_val, String.format(java.util.Locale.US, "%.2f", valF))
                 }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}

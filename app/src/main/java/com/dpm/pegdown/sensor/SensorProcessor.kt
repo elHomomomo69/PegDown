@@ -133,7 +133,7 @@ class SensorProcessor(
             Math.toDegrees(atan2(-x.toDouble(), sqrt(((y * y) + (z * z)).toDouble())))
         }
 
-        if (abs(newRawTilt - rawTilt) > 5.0 || sensorStartupCounter < 15) {
+        if ((abs(newRawTilt - rawTilt) > 5.0) || (sensorStartupCounter < 15)) {
             smoothedTilt = newRawTilt
             sensorStartupCounter++
         } else {
@@ -161,7 +161,7 @@ class SensorProcessor(
             lastPeakLeanAngle = if (abs(maxTempLeft) > abs(maxTempRight)) maxTempLeft else maxTempRight
             tempResetRunnable?.let { handler.removeCallbacks(it) }
             tempResetRunnable = Runnable {
-                if (isRecording && (abs(lastPeakLeanAngle) > 0.5 || maxAcceleration > 0.05 || abs(maxBraking) > 0.05)) {
+                if (isRecording && ((abs(lastPeakLeanAngle) > 0.5) || (maxAcceleration > 0.05) || (abs(maxBraking) > 0.05))) {
                     recordEntry()
                 }
                 maxTempLeft = 0.0

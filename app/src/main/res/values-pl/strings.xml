@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">Auto-Start od: %.1f km/h</string>
     <string name="desc_auto_start_speed">Prędkość wymagana do automatycznego rozpoczęcia nagrywania.</string>
     <string name="setting_smoothing">Wygładzanie (Alpha)</string>
+    <string name="setting_smoothing_with_val">Wygładzanie (Alpha): %s</string>
     <string name="desc_smoothing">Niska: Stabilna/Powolna reakcja. Wysoka: Natychmiastowa reakcja.</string>
     <string name="setting_default_mode">Domyślne nagrywanie</string>
     <string name="desc_default_mode">Wybierz, czy aplikacja startuje w trybie ręcznym czy automatycznym.</string>

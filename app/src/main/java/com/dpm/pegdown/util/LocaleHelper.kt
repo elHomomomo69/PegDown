@@ -8,7 +8,7 @@ object LocaleHelper {
     fun wrapContext(context: Context, language: String): Context {
         if (language == "auto") return context
 
-        val locale = Locale(language)
+        val locale = Locale.forLanguageTag(language)
         Locale.setDefault(locale)
 
         val config = Configuration(context.resources.configuration)

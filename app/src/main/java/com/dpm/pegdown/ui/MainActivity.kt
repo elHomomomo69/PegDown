@@ -73,7 +73,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         // Permissions
         if (androidx.core.content.ContextCompat.checkSelfPermission(
                 this,
-                android.Manifest.permission.ACCESS_FINE_LOCATION
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
             ) != android.content.pm.PackageManager.PERMISSION_GRANTED
         ) {
             androidx.core.app.ActivityCompat.requestPermissions(
@@ -82,7 +82,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
                     android.Manifest.permission.ACCESS_FINE_LOCATION,
                     android.Manifest.permission.ACCESS_COARSE_LOCATION,
                 ),
-                1001
+                1001,
             )
         }
 
@@ -507,7 +507,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     private fun checkAutoStartCondition(speedKmH: Double) {
-        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && speedKmH > settingsManager.autoStartSpeedKmH) {
+        if ((currentRecordMode == RecordingMode.AUTO_IDLE) && !isRecording && (speedKmH > settingsManager.autoStartSpeedKmH)) {
             startRecording()
             currentRecordMode = RecordingMode.AUTO_RECORDING
             handler.post {

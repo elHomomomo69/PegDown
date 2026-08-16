@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">自动开始速度: %.1f 公里/小时</string>
     <string name="desc_auto_start_speed">在自动待机模式下自动开始记录所需的速度。</string>
     <string name="setting_smoothing">仪表平滑度 (Alpha)</string>
+    <string name="setting_smoothing_with_val">仪表平滑度 (Alpha): %s</string>
     <string name="desc_smoothing">低：稳定/反应慢。高：即时/反应快。</string>
     <string name="setting_default_mode">默认记录模式</string>
     <string name="desc_default_mode">选择应用启动时是手动还是自动模式。</string>

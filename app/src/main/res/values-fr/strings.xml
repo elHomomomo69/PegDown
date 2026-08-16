@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">Auto-Départ à : %.1f km/h</string>
     <string name="desc_auto_start_speed">Vitesse nécessaire pour démarrer l\'enregistrement automatique.</string>
     <string name="setting_smoothing">Lissage (Alpha)</string>
+    <string name="setting_smoothing_with_val">Lissage (Alpha) : %s</string>
     <string name="desc_smoothing">Bas : Stable/Lent. Haut : Instantané/Rapide.</string>
     <string name="setting_default_mode">Mode par défaut</string>
     <string name="desc_default_mode">Choisissez si l\'app démarre en mode manuel ou automatique.</string>

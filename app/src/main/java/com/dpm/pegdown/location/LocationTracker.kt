@@ -31,7 +31,7 @@ class LocationTracker(
                     LocationManager.GPS_PROVIDER,
                     1000L,
                     2f,
-                    androidLocationListener
+                    androidLocationListener,
                 )
                 
                 // Optional: Auch den Network Provider nutzen für schnellere erste Fixes

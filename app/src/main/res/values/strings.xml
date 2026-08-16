@@ -35,6 +35,7 @@
     <string name="setting_auto_start_speed">Auto-Start Speed: %.1f km/h</string>
     <string name="desc_auto_start_speed">Speed required to automatically start recording in Auto-Idle mode.</string>
     <string name="setting_smoothing">Gauge Smoothing (Alpha)</string>
+    <string name="setting_smoothing_with_val">Gauge Smoothing (Alpha): %s</string>
     <string name="desc_smoothing">Low: Stable/Slow reaction. High: Instant/Fast reaction.</string>
     <string name="setting_default_mode">Default Recording Mode</string>
     <string name="desc_default_mode">Choose if the app starts in manual or automatic mode.</string>

@@ -34,6 +34,7 @@
     <string name="setting_auto_start_speed">自動開始速度: %.1f km/h</string>
     <string name="desc_auto_start_speed">自動待機モードで記録を開始する速度。</string>
     <string name="setting_smoothing">ゲージの平滑化 (Alpha)</string>
+    <string name="setting_smoothing_with_val">ゲージの平滑化 (Alpha)：%s</string>
     <string name="desc_smoothing">低：安定/反応が遅い。高：即時/反応が早い。</string>
     <string name="setting_default_mode">デフォルトの記録モード</string>
     <string name="desc_default_mode">アプリ起動時のモードを選択します。</string>
