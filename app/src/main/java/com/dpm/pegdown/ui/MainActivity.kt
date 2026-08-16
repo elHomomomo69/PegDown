@@ -18,6 +18,7 @@ import androidx.core.graphics.toColorInt
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.dpm.pegdown.R
+import com.dpm.pegdown.data.SettingsManager
 import com.dpm.pegdown.data.TourExporter
 import com.dpm.pegdown.location.LocationTracker
 import com.dpm.pegdown.location.LocationUpdateListener
@@ -25,6 +26,7 @@ import com.dpm.pegdown.model.RecordingMode
 import com.dpm.pegdown.model.TourLogEntry
 import com.dpm.pegdown.sensor.SensorProcessor
 import com.dpm.pegdown.sensor.SensorUpdateListener
+import com.dpm.pegdown.util.LocaleHelper
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
@@ -34,17 +36,23 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     private lateinit var sensorProcessor: SensorProcessor
     private lateinit var locationTracker: LocationTracker
     private lateinit var tourExporter: TourExporter
+    private lateinit var settingsManager: SettingsManager
+
+    override fun attachBaseContext(newBase: android.content.Context) {
+        val manager = SettingsManager(newBase)
+        super.attachBaseContext(LocaleHelper.wrapContext(newBase, manager.selectedLanguage))
+    }
 
     private lateinit var tvStatus: TextView
     private lateinit var tvMaxTour: TextView
     private lateinit var tvSpeed: TextView
     private lateinit var gaugeView: LeanAngleGauge
     private lateinit var btnLockView: Button
-    private lateinit var btnInvertAxis: Button
     private lateinit var tvAccelLeft: TextView
     private lateinit var tvAccelRight: TextView
     private lateinit var btnInfo: Button
     private lateinit var btnRecord: Button
+    private lateinit var btnSettings: Button
 
     private var isOrientationLocked = false
     private var manualInvert = false
@@ -57,6 +65,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         super.onCreate(savedInstanceState)
 
         // Components
+        settingsManager = SettingsManager(this)
         sensorProcessor = SensorProcessor(this, this)
         locationTracker = LocationTracker(this, this)
         tourExporter = TourExporter(this)
@@ -93,6 +102,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         if (isOrientationLocked) lockCurrentOrientation()
 
         setupUI()
+        applySettings()
         updateTourMaxText()
     }
 
@@ -160,25 +170,9 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
                     text = getString(R.string.btn_lock_view)
                     bgDrawable.setColor("#222222".toColorInt())
                 }
-            }
-        }
-
-        btnInvertAxis = createCornerButton(
-            if (manualInvert) getString(R.string.btn_axis_inverted)
-            else getString(R.string.btn_axis_normal),
-            if (manualInvert) "#FF9800" else "#222222",
-            4
-        ).apply {
-            setOnClickListener {
-                manualInvert = !manualInvert
-                gaugeView.setInverted(manualInvert)
-                val bgDrawable = background as GradientDrawable
-                if (manualInvert) {
-                    text = getString(R.string.btn_axis_inverted)
-                    bgDrawable.setColor("#FF9800".toColorInt())
-                } else {
-                    text = getString(R.string.btn_axis_normal)
-                    bgDrawable.setColor("#222222".toColorInt())
+                
+                if (settingsManager.isOrientationSaveEnabled) {
+                    settingsManager.lockedOrientation = requestedOrientation
                 }
             }
         }
@@ -199,6 +193,16 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
             8
         ).apply {
             setOnClickListener { showInstructionsDialog() }
+        }
+
+        btnSettings = createCornerButton(
+            getString(R.string.btn_settings),
+            "#222222",
+            8
+        ).apply {
+            setOnClickListener {
+                startActivity(android.content.Intent(this@MainActivity, SettingsActivity::class.java))
+            }
         }
 
         btnRecord = createCornerButton(
@@ -232,7 +236,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         }
 
         topLeftContainer.addView(tvStatus)
-        topLeftContainer.addView(btnInvertAxis)
+        topLeftContainer.addView(btnSettings)
         topLeftContainer.addView(btnRecord)
         rootLayout.addView(topLeftContainer)
 
@@ -445,6 +449,38 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
         recordedEntries.clear()
     }
 
+    private fun applySettings() {
+        sensorProcessor.resetDurationMillis = settingsManager.resetDurationSeconds * 1000L
+        sensorProcessor.smoothingAlpha = settingsManager.smoothingFactor.toDouble()
+        gaugeView.setInverted(settingsManager.isAxisInverted)
+        
+        if (settingsManager.isOrientationSaveEnabled) {
+            val savedOrient = settingsManager.lockedOrientation
+            if (savedOrient != -1) {
+                isOrientationLocked = true
+                requestedOrientation = savedOrient
+                (btnLockView.background as GradientDrawable).setColor("#FF1744".toColorInt())
+                btnLockView.text = getString(R.string.btn_locked)
+            }
+        }
+
+        if (!isRecording) {
+            currentRecordMode = settingsManager.defaultRecordingMode
+            val bgDrawable = btnRecord.background as GradientDrawable
+            when (currentRecordMode) {
+                RecordingMode.MANUAL -> {
+                    btnRecord.text = getString(R.string.btn_record)
+                    bgDrawable.setColor("#222222".toColorInt())
+                }
+                RecordingMode.AUTO_IDLE -> {
+                    btnRecord.text = getString(R.string.status_auto_idle)
+                    bgDrawable.setColor("#0D47A1".toColorInt())
+                }
+                else -> {}
+            }
+        }
+    }
+
     private fun stopRecording() {
         isRecording = false
         sensorProcessor.isRecording = false
@@ -471,7 +507,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     private fun checkAutoStartCondition(speedKmH: Double) {
-        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && speedKmH > 7.0) {
+        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && speedKmH > settingsManager.autoStartSpeedKmH) {
             startRecording()
             currentRecordMode = RecordingMode.AUTO_RECORDING
             handler.post {
@@ -528,8 +564,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     private fun lockCurrentOrientation() {
         val currentOrientation = resources.configuration.orientation
         val rotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.rotation
+            display?.rotation ?: android.view.Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.rotation
@@ -557,6 +592,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
     override fun onResume() {
         super.onResume()
+        applySettings()
         sensorProcessor.start()
         locationTracker.start()
     }

@@ -30,11 +30,14 @@ class SensorProcessor(
     private var tempResetRunnable: Runnable? = null
     private var accelResetRunnable: Runnable? = null
 
+    // Settings
+    var resetDurationMillis: Long = 7000L
+    var smoothingAlpha: Double = 0.07
+
     // State
     var calibrationOffset = 0.0
     private var rawTilt = 0.0
     private var smoothedTilt = 0.0
-    private val alpha = 0.07
     private var sensorStartupCounter = 0
 
     // Lean Angle
@@ -134,7 +137,7 @@ class SensorProcessor(
             smoothedTilt = newRawTilt
             sensorStartupCounter++
         } else {
-            smoothedTilt += alpha * (newRawTilt - smoothedTilt)
+            smoothedTilt += smoothingAlpha * (newRawTilt - smoothedTilt)
         }
         rawTilt = newRawTilt
 
@@ -168,7 +171,7 @@ class SensorProcessor(
                 maxBraking = 0.0
                 notifyUpdates()
             }
-            handler.postDelayed(tempResetRunnable!!, 7000)
+            handler.postDelayed(tempResetRunnable!!, resetDurationMillis)
         }
 
         notifyUpdates()
@@ -210,7 +213,7 @@ class SensorProcessor(
                 maxBraking = 0.0
                 notifyUpdates()
             }
-            handler.postDelayed(accelResetRunnable!!, 7000)
+            handler.postDelayed(accelResetRunnable!!, resetDurationMillis)
         }
         notifyUpdates()
     }
