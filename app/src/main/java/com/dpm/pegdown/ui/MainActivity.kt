@@ -71,7 +71,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
                 this,
                 arrayOf(
                     android.Manifest.permission.ACCESS_FINE_LOCATION,
-                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
                 ),
                 1001
             )
@@ -373,11 +373,12 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
     }
 
     private fun updateTourMaxText() {
-        tvMaxTour.text = getString(R.string.tour_max_format,
+        tvMaxTour.text = getString(
+            R.string.tour_max_format,
             abs(sensorProcessor.maxTourLeft),
             abs(sensorProcessor.maxTourRight),
             sensorProcessor.tourMaxAccel,
-            abs(sensorProcessor.tourMaxBrake)
+            abs(sensorProcessor.tourMaxBrake),
         )
     }
 
@@ -452,7 +453,7 @@ class MainActivity : Activity(), SensorUpdateListener, LocationUpdateListener {
 
     private fun toggleAutoMode() {
         val bgDrawable = btnRecord.background as GradientDrawable
-        if (currentRecordMode == RecordingMode.MANUAL || currentRecordMode == RecordingMode.AUTO_RECORDING) {
+        if ((currentRecordMode == RecordingMode.MANUAL) || (currentRecordMode == RecordingMode.AUTO_RECORDING)) {
             currentRecordMode = RecordingMode.AUTO_IDLE
             isRecording = false
             sensorProcessor.isRecording = false

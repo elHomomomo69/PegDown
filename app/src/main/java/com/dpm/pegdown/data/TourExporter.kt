@@ -36,7 +36,8 @@ class TourExporter(private val context: Context) {
                 if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
 
                 val isoTime = entry.timestamp.replace(" ", "T") + "Z"
-                val desc = String.format(Locale.US,
+                val desc = String.format(
+                    Locale.US,
                     "Lean: L %.1f R %.1f | Accel: %.2fg | Brake: %.2fg | Speed: %.1f kmh",
                     entry.leanAngleLeft,
                     entry.leanAngleRight,
@@ -52,7 +53,11 @@ class TourExporter(private val context: Context) {
         <desc>%s</desc>
       </trkpt>
 """,
-                    entry.lat, entry.lon, isoTime, desc, desc
+                    entry.lat,
+                    entry.lon,
+                    isoTime,
+                    desc,
+                    desc,
                 )
                 gpxContent.append(entryXml)
             }

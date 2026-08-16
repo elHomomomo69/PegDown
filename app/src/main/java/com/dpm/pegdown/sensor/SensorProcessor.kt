@@ -127,7 +127,7 @@ class SensorProcessor(
             val invertSign = if (rotation == Surface.ROTATION_270) 1.0 else -1.0
             Math.toDegrees(atan2((-y * invertSign), sqrt(((x * x) + (z * z)).toDouble())))
         } else {
-            Math.toDegrees(atan2(-x.toDouble(), sqrt((y * y + z * z).toDouble())))
+            Math.toDegrees(atan2(-x.toDouble(), sqrt(((y * y) + (z * z)).toDouble())))
         }
 
         if (abs(newRawTilt - rawTilt) > 5.0 || sensorStartupCounter < 15) {
@@ -227,7 +227,7 @@ class SensorProcessor(
             braking = maxBraking,
             lat = currentLatitude,
             lon = currentLongitude,
-            speed = currentSpeedKmH
+            speed = currentSpeedKmH,
         )
         listener.onPeakRecorded(entry)
     }

@@ -24,7 +24,7 @@ class LocationTracker(
         try {
             if (androidx.core.content.ContextCompat.checkSelfPermission(
                     context,
-                    android.Manifest.permission.ACCESS_FINE_LOCATION
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
             ) {
                 locationManager.requestLocationUpdates(

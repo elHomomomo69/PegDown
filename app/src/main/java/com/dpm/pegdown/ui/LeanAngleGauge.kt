@@ -145,7 +145,7 @@ class LeanAngleGauge @JvmOverloads constructor(
         paint.strokeCap = Paint.Cap.BUTT
         paint.color = "#DDDDDD".toColorInt()
 
-        for (angle in (-60..60 step 15)) {
+        for (angle in ((-60..60) step 15)) {
             val degInCanvas = 270.0 + angle
             val rad = Math.toRadians(degInCanvas)
             val innerR = radius - halfStroke
@@ -155,7 +155,7 @@ class LeanAngleGauge @JvmOverloads constructor(
                 centerY + (innerR * sin(rad)).toFloat(),
                 centerX + (outerR * cos(rad)).toFloat(),
                 centerY + (outerR * sin(rad)).toFloat(),
-                paint
+                paint,
             )
         }
 
