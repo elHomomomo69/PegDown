@@ -4,7 +4,6 @@ import android.app.*
 import android.content.Intent
 import android.location.Location
 import android.os.Binder
-import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.dpm.pegdown.R
@@ -64,7 +63,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         if (!isRecording) {
             sensorProcessor.stop()
             locationTracker.stop()
-            stopForeground(true)
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
     }
@@ -79,7 +78,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     fun stopTourRecording() {
         isRecording = false
         sensorProcessor.isRecording = false
-        stopForeground(true)
+        stopForeground(STOP_FOREGROUND_REMOVE)
     }
 
     fun calibrate() {
@@ -91,10 +90,9 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         recordedEntries.clear()
     }
 
-    fun updateSettings(resetMillis: Long, smoothing: Double, invert: Boolean) {
+    fun updateSettings(resetMillis: Long, smoothing: Double) {
         sensorProcessor.resetDurationMillis = resetMillis
         sensorProcessor.smoothingAlpha = smoothing
-        // Invert check is handled in MainActivity UI, but we can pass it here if needed for processing
     }
 
     override fun onLeanAngleUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
@@ -132,14 +130,12 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                "recording_channel",
-                "Recording Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
+        val channel = NotificationChannel(
+            "recording_channel",
+            "Recording Service",
+            NotificationManager.IMPORTANCE_LOW,
+        )
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.createNotificationChannel(channel)
     }
 }

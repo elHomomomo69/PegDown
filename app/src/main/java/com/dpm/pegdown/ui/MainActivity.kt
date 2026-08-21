@@ -121,6 +121,9 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     override fun onStop() {
         super.onStop()
         if (isBound) {
+            if (!isRecording) {
+                recordingService?.stopTracking()
+            }
             recordingService?.setUpdateListener(null)
             unbindService(serviceConnection)
             isBound = false
@@ -130,11 +133,17 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     private fun setupUI() {
         val rootLayout = FrameLayout(this).apply {
             setBackgroundColor("#000000".toColorInt())
-            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
         }
 
         gaugeView = LeanAngleGauge(this).apply {
-            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
             setOnClickListener {
                 recordingService?.calibrate()
                 tvStatus.text = getString(R.string.calibrated_format, 0.0)
@@ -291,7 +300,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
                 val w = resources.displayMetrics.widthPixels.toFloat()
                 val cY = if (isLandscape) h * 0.95f else h * 0.52f
                 val rad = if (isLandscape) kotlin.math.min(h * 0.82f, w * 0.38f) else kotlin.math.min(w, h * 2.2f) * 0.42f
-                topMargin = (if (isLandscape) cY - (rad * 0.15f) else cY + (rad * 0.25f) - 30f).toInt()
+                topMargin = (if (isLandscape) cY - (rad * 0.15f) else (cY + (rad * 0.25f) - 30f)).toInt()
                 leftMargin = leftM; rightMargin = rightM
             }
         }
@@ -299,7 +308,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
 
     override fun onSensorUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastUIUpdateTime > 16) {
+        if ((now - lastUIUpdateTime) > 16) {
             gaugeView.updateData(current, tempL, tempR, tourL, tourR)
             lastTourL = tourL; lastTourR = tourR
             updateTourMax()
@@ -309,7 +318,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
 
     override fun onAccelUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastUIUpdateTime > 16) {
+        if ((now - lastUIUpdateTime) > 16) {
             tvAccelLeft.text = getString(R.string.acc_format, accel)
             tvAccelRight.text = getString(R.string.brake_format, abs(brake))
             lastTourAcc = tourMaxAccel; lastTourBrake = tourMaxBrake
@@ -329,7 +338,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
 
     private fun applySettingsToService() {
         recordingService?.let { s ->
-            s.updateSettings(settingsManager.resetDurationSeconds * 1000L, settingsManager.smoothingFactor.toDouble(), settingsManager.isAxisInverted)
+            s.updateSettings(settingsManager.resetDurationSeconds * 1000L, settingsManager.smoothingFactor.toDouble())
             s.startTracking()
             isRecording = s.isRecording
             currentRecordMode = settingsManager.defaultRecordingMode
@@ -380,7 +389,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     }
 
     private fun checkAutoStart(spd: Double) {
-        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && spd > settingsManager.autoStartSpeedKmH) {
+        if (currentRecordMode == RecordingMode.AUTO_IDLE && !isRecording && (spd > settingsManager.autoStartSpeedKmH)) {
             recordingService?.startTourRecording()
             isRecording = true; currentRecordMode = RecordingMode.AUTO_RECORDING
             handler.post { updateRecordButtonUI(); tvStatus.text = getString(R.string.auto_recording_status); tvStatus.setTextColor("#00E676".toColorInt()) }
