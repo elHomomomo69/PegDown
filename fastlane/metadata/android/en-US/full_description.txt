@@ -1,0 +1,25 @@
+PegDown is your digital motorcycle companion for tracking lean angles, acceleration, and braking forces in real-time.
+
+1. Main Screen
+Shows your current lean angle and G-forces.
+- Colors: Green (easy), Yellow (sporty), Red (limit).
+- Markers: Yellow shows the last corner's peak, Blue shows the tour's maximum.
+- Self-Correction: The app automatically adjusts the zero-point if you ride straight for a while (>40km/h).
+
+2. Setup & Display
+- Calibration: Tap the gauge to set 0° manually.
+- Battery Saving: Optimized for OLED screens (uses true black to save power).
+
+3. Recording in the Background
+- Multi-Tasking: Recording continues even if you switch to a navigation app or turn off the screen. An icon in the status bar shows that PegDown is active.
+- Lock View: Keeps the screen from rotating while you lean.
+
+4. Automatic Start
+- Manual: Tap Record to start/stop.
+- Auto-Idle: Long-press Record. It will "wake up" and start tracking as soon as you reach your set speed.
+
+5. Exporting Data
+- Formats: Save as GPX (for maps/Calimoto) or CSV (for Excel).
+- Smart Files: Redundant data is removed to keep files small without losing precision.
+
+Safety first: Never operate the app while riding!

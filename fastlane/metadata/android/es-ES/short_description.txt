@@ -1,0 +1,1 @@
+Registra ángulos de inclinación, fuerzas G y rutas GPS en moto.

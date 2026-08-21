@@ -1,0 +1,25 @@
+PegDown ist dein digitaler Motorrad-Begleiter zur Erfassung von Schräglage, Beschleunigung und Bremskräften in Echtzeit.
+
+1. Hauptbildschirm
+Echtzeit-Anzeige von Schräglage und Kräften.
+- Farben: Grün (entspannt), Gelb (sportlich), Rot (Grenzbereich).
+- Marker: Gelb zeigt den Spitzenwert der letzten Kurve, Blau das Maximum der gesamten Tour.
+- Selbst-Korrektur: Die App justiert den Nullpunkt automatisch nach, wenn du länger geradeaus fährst (>40km/h).
+
+2. Einrichtung & Display
+- Kalibrierung: Tippe auf die Anzeige, um 0° manuell zu setzen.
+- Akku-Schonung: Optimiert für OLED-Displays (echtes Schwarz spart Strom).
+
+3. Hintergrund-Aufzeichnung
+- Navi-Nutzung: Die Aufzeichnung läuft stabil weiter, auch wenn du zu Google Maps wechselst oder das Display ausschaltest. Ein Symbol in der Statusleiste zeigt, dass PegDown aktiv ist.
+- Ansicht fixieren: Verhindert, dass der Bildschirm in Kurven ungewollt rotiert.
+
+4. Automatischer Start
+- Manuell: Aufzeichnung tippen für Start/Stopp.
+- Auto-Bereit: Aufzeichnung lange drücken. Die App "erwacht" und startet das Tracking von selbst, sobald du die eingestellte Geschwindigkeit erreichst.
+
+5. Export & Daten
+- Formate: GPX (für Karten/Calimoto) oder CSV (für Excel).
+- Schlanke Dateien: Unnötige Datenpunkte werden entfernt, um Speicherplatz zu sparen, ohne den Kurvenverlauf zu verfälschen.
+
+Sicherheit zuerst: Nicht während der Fahrt bedienen!

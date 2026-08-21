@@ -1,0 +1,25 @@
+PegDown es tu compañero digital para moto, permitiéndote registrar la inclinación, aceleración y frenado en tiempo real.
+
+1. Pantalla Principal
+Muestra tu inclinación y fuerzas G en tiempo real.
+- Colores: Verde (relajado), Amarillo (deportivo), Rojo (límite).
+- Marcadores: El amarillo muestra el pico de la última curva, el azul el máximo de todo el tour.
+- Autocorrección: La app ajusta el punto cero si conduces en línea recta por un tiempo (>40km/h).
+
+2. Ajustes y Pantalla
+- Calibración: Toca el indicador para establecer 0° manualmente.
+- Ahorro de Batería: Optimizado para pantallas OLED (usa negro puro para ahorrar energía).
+
+3. Grabación en Segundo Plano
+- Multitarea: La grabación continúa aunque cambies al navegador o apagues la pantalla. Un icono en la barra de estado indica que PegDown está activo.
+- Fijar vista: Evita que la pantalla rote mientras te inclinas.
+
+4. Inicio Automático
+- Manual: Toca Grabar para iniciar/detener.
+- Auto-Espera: Mantén pulsado Grabar. La app se "despertará" e iniciará el seguimiento al alcanzar la velocidad establecida.
+
+5. Exportación de Datos
+- Formatos: Guarda como GPX (para mapas/Calimoto) o CSV (para Excel).
+- Archivos Ligeros: Se eliminan datos redundantes para mantener los archivos pequeños sin perder precisión.
+
+Seguridad ante todo: ¡No uses la app mientras conduces!

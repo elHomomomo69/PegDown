@@ -1,0 +1,25 @@
+PegDown est votre compagnon moto numérique pour suivre vos angles d'inclinaison, votre accélération et vos forces de freinage en temps réel.
+
+1. Écran Principal
+Inclinaison et forces G en temps réel.
+- Couleurs : Vert (détendu), Jaune (sportif), Rouge (limite).
+- Marqueurs : Jaune pour le pic du dernier virage, Bleu pour le maximum du tour.
+- Auto-correction : L'app ajuste le point zéro si vous roulez en ligne droite pendant un moment (>40km/h).
+
+2. Réglages & Affichage
+- Calibrage : Touchez la jauge pour régler le 0° manuellement.
+- Économie d'énergie : Optimisé pour écrans OLED (utilise du noir pur pour économiser la batterie).
+
+3. Enregistrement en Arrière-plan
+- Multi-tâches : L'enregistrement continue même si vous utilisez un GPS ou éteignez l'écran. Une icône indique que PegDown est actif.
+- Fixer vue : Empêche la rotation de l'écran lors de l'inclinaison.
+
+4. Départ Automatique
+- Manuel : Appuyez sur Enregistrer.
+- Auto-Prêt : Appuyez longuement sur Enregistrer. L'app "se réveille" et démarre le suivi dès que vous atteignez la vitesse définie.
+
+5. Exportation des Données
+- Formats : GPX (pour cartes/Calimoto) ou CSV (pour Excel).
+- Fichiers légers : Les données inutiles sont supprimées pour des fichiers compacts et précis.
+
+Sécurité d'abord : N'utilisez pas l'application en roulant !

@@ -1,0 +1,25 @@
+PegDown to Twój cyfrowy towarzysz motocyklowy do śledzenia kątów pochylenia, przyspieszenia i sił hamowania w czasie rzeczywistym.
+
+1. Ekran Główny
+Kąt pochylenia i siły G w czasie rzeczywistym.
+- Kolory: Zielony (relaks), Żółty (sport), Czerwony (limit).
+- Znaczniki: Żółty pokazuje szczyt ostatniego zakrętu, Niebieski maksimum całej trasy.
+- Samoczynna korekta: Aplikacja automatycznie ustawia punkt zerowy, jeśli jedziesz prosto przez dłuższą chwilę (>40km/h).
+
+2. Ustawienia i Ekran
+- Kalibracja: Dotknij wskaźnika, aby ręcznie ustawić 0°.
+- Oszczędzanie Baterii: Optymalizacja dla ekranów OLED (prawdziwa czerń oszczędza energię).
+
+3. Nagrywanie w Tle
+- Wielozadaniowość: Nagrywanie trwa, nawet jeśli korzystasz z nawigacji lub wygasisz ekran. Ikona na pasku statusu informuje o działaniu PegDown.
+- Blokada widoku: Zapobiega obracaniu się ekranu podczas pochylania.
+
+4. Automatyczny Start
+- Manualny: Dotknij Nagraj, aby zacząć/skoczyć.
+- Auto-Czuwanie: Przytrzymaj Nagraj. Aplikacja „obudzi się” i zacznie śledzenie, gdy tylko osiągniesz zadaną prędkość.
+
+5. Eksport Danych
+- Formaty: GPX (do map/Calimoto) lub CSV (do Excela).
+- Smukłe Pliki: Zbędne dane są usuwane, by pliki były małe, ale dokładne.
+
+Bezpieczeństwo przede wszystkim: Nigdy nie obsługuj aplikacji podczas jazdy!
