@@ -399,19 +399,45 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     private fun showSaveDialog() {
         val df = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault())
         val name = df.format(java.util.Date())
-        val input = android.widget.EditText(this).apply { setText(name); setTextColor(Color.WHITE); setBackgroundColor("#222222".toColorInt()); setPadding(40, 30, 40, 30) }
-        android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.save_tour_title)).setMessage(getString(R.string.save_tour_msg)).setView(input)
+        val input = android.widget.EditText(this).apply {
+            setText(name)
+            setTextColor(Color.WHITE)
+            setBackgroundColor("#222222".toColorInt())
+            setPadding(40, 30, 40, 30)
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(getString(R.string.save_tour_title))
+            .setMessage(getString(R.string.save_tour_msg))
+            .setView(input)
             .setPositiveButton(getString(R.string.btn_save)) { _, _ ->
                 val entries = recordingService?.recordedEntries ?: emptyList()
-                if (settingsManager.exportFormat == ExportFormat.GPX) tourExporter.saveTourToGpx(input.text.toString(), entries)
-                else tourExporter.saveTourToCsv(input.text.toString(), entries)
-            }.setNegativeButton(getString(R.string.btn_cancel), null).show()
+                val fileName = input.text.toString()
+                if (settingsManager.exportFormat == ExportFormat.GPX) {
+                    tourExporter.saveTourToGpx(fileName, entries)
+                } else {
+                    tourExporter.saveTourToCsv(fileName, entries)
+                }
+            }
+            .setNegativeButton(getString(R.string.btn_cancel), null)
+            .show()
     }
 
     private fun showInstructionsDialog() {
-        val tv = TextView(this).apply { text = getString(R.string.instructions_msg); textSize = 14f; setTextColor(Color.WHITE); setPadding(50, 30, 50, 30) }
-        android.app.AlertDialog.Builder(this).setTitle(getString(R.string.instructions_title)).setView(android.widget.ScrollView(this).apply { addView(tv) }).setPositiveButton("OK", null).show()
+        val tv = TextView(this).apply {
+            text = getString(R.string.instructions_msg)
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(50, 30, 50, 30)
+        }
+        val sv = android.widget.ScrollView(this).apply {
+            addView(tv)
+            setBackgroundColor(Color.BLACK)
+        }
+        android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle(getString(R.string.instructions_title))
+            .setView(sv)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     private fun lockCurrentOrientation() {

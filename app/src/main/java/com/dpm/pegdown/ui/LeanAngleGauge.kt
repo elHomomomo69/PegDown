@@ -5,6 +5,8 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Color
 import android.graphics.drawable.BitmapDrawable
 import android.view.View
 import androidx.core.content.ContextCompat
@@ -240,7 +242,20 @@ class LeanAngleGauge @JvmOverloads constructor(
                 val bWidth = bitmap.width.toFloat()
                 val bHeight = bitmap.height.toFloat()
 
-                paint.colorFilter = android.graphics.LightingColorFilter(currentNeonColor, 0)
+                // High-intensity color filter that boosts brightness and preserves details
+                val color = currentNeonColor
+                val r = Color.red(color) / 255f
+                val g = Color.green(color) / 255f
+                val b = Color.blue(color) / 255f
+                
+                // We increase the scale (1.6x) and add an offset (45) to make it "pop" and look like it's glowing
+                val matrix = floatArrayOf(
+                    r * 1.6f, 0f, 0f, 0f, 45f,
+                    0f, g * 1.6f, 0f, 0f, 45f,
+                    0f, 0f, b * 1.6f, 0f, 45f,
+                    0f, 0f, 0f, 1f, 0f
+                )
+                paint.colorFilter = ColorMatrixColorFilter(matrix)
                 drawBitmap(bitmap, -bWidth / 2f, -bHeight / 2f, paint)
                 paint.colorFilter = null
             }
