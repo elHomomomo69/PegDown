@@ -1,0 +1,1 @@
+Lanzamiento inicial: seguimiento de inclinación en tiempo real, grabación en segundo plano y exportación GPX.

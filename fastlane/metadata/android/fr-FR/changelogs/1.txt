@@ -1,0 +1,1 @@
+Première version : suivi de l'inclinaison en temps réel, enregistrement en arrière-plan et exportation GPX.

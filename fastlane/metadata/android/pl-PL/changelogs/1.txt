@@ -1,0 +1,1 @@
+Pierwsze wydanie: śledzenie kąta pochylenia w czasie rzeczywistym, nagrywanie w tle i eksport GPX.

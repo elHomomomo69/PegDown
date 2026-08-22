@@ -1,0 +1,1 @@
+Initial release: Real-time lean angle tracking, background recording, and GPX export.
