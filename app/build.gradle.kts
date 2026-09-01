@@ -40,6 +40,11 @@ android {
     buildFeatures {
         compose = true
     }
+
+    dependenciesInfo {
+        includeInBundle = false
+        includeInApk = false
+    }
 }
 
 dependencies {
