@@ -12,6 +12,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
+import android.view.Surface
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -176,16 +177,31 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
         btnLockView = createBtn(getString(R.string.btn_lock_view), "#222222", 8).apply {
             setOnClickListener {
                 isOrientationLocked = !isOrientationLocked
+                val bg = background as GradientDrawable
                 if (isOrientationLocked) {
                     lockCurrentOrientation()
                     text = getString(R.string.btn_locked)
-                    (background as GradientDrawable).setColor("#FF1744".toColorInt())
+                    bg.setColor("#FF1744".toColorInt())
                 } else {
                     requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                     text = getString(R.string.btn_lock_view)
-                    (background as GradientDrawable).setColor("#222222".toColorInt())
+                    bg.setColor("#222222".toColorInt())
                 }
-                if (settingsManager.isOrientationSaveEnabled) settingsManager.lockedOrientation = requestedOrientation
+                
+                if (settingsManager.isOrientationSaveEnabled) {
+                    // We save a specific orientation (Landscape/Portrait) for the next launch
+                    // instead of the 'LOCKED' constant (14), to ensure it jumps to the right mode.
+                    if (isOrientationLocked) {
+                        val currentOrient = resources.configuration.orientation
+                        val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) display?.rotation ?: 0 else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
+                        val toSave = if (currentOrient == Configuration.ORIENTATION_LANDSCAPE) {
+                            if (rot == Surface.ROTATION_270) ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                        } else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                        settingsManager.lockedOrientation = toSave
+                    } else {
+                        settingsManager.lockedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    }
+                }
             }
         }
 
@@ -441,10 +457,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     }
 
     private fun lockCurrentOrientation() {
-        val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) display?.rotation ?: 0 else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
-        requestedOrientation = if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
-            if (rot == android.view.Surface.ROTATION_270) ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        } else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
     }
 
     override fun onResume() { super.onResume(); applySettingsToService() }
