@@ -85,6 +85,8 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         sensorProcessor.calibrate()
     }
 
+    fun getCalibrationOffset(): Double = sensorProcessor.calibrationOffset
+
     fun resetTour() {
         sensorProcessor.resetTour()
         recordedEntries.clear()

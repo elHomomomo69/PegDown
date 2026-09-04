@@ -147,7 +147,8 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
             )
             setOnClickListener {
                 recordingService?.calibrate()
-                tvStatus.text = getString(R.string.calibrated_format, 0.0)
+                val offset = recordingService?.getCalibrationOffset() ?: 0.0
+                tvStatus.text = getString(R.string.calibrated_format, offset)
                 tvStatus.setTextColor("#00E676".toColorInt())
             }
         }
@@ -189,18 +190,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
                 }
                 
                 if (settingsManager.isOrientationSaveEnabled) {
-                    // We save a specific orientation (Landscape/Portrait) for the next launch
-                    // instead of the 'LOCKED' constant (14), to ensure it jumps to the right mode.
-                    if (isOrientationLocked) {
-                        val currentOrient = resources.configuration.orientation
-                        val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) display?.rotation ?: 0 else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
-                        val toSave = if (currentOrient == Configuration.ORIENTATION_LANDSCAPE) {
-                            if (rot == Surface.ROTATION_270) ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-                        } else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-                        settingsManager.lockedOrientation = toSave
-                    } else {
-                        settingsManager.lockedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                    }
+                    settingsManager.lockedOrientation = requestedOrientation
                 }
             }
         }
@@ -359,11 +349,21 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
             isRecording = s.isRecording
             currentRecordMode = settingsManager.defaultRecordingMode
             updateRecordButtonUI()
+            
+            // Update calibration status display
+            val offset = s.getCalibrationOffset()
+            if (offset != 0.0) {
+                tvStatus.text = getString(R.string.calibrated_format, offset)
+                tvStatus.setTextColor("#00E676".toColorInt())
+            } else {
+                tvStatus.text = getString(R.string.not_calibrated)
+                tvStatus.setTextColor("#FF5252".toColorInt())
+            }
         }
         gaugeView.setInverted(settingsManager.isAxisInverted)
         if (settingsManager.isOrientationSaveEnabled) {
             val orient = settingsManager.lockedOrientation
-            if (orient != -1) {
+            if (orient != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
                 isOrientationLocked = true
                 requestedOrientation = orient
                 (btnLockView.background as GradientDrawable).setColor("#FF1744".toColorInt())
@@ -457,7 +457,13 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
     }
 
     private fun lockCurrentOrientation() {
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+        val currentOrient = resources.configuration.orientation
+        val rot = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) display?.rotation ?: 0 else @Suppress("DEPRECATION") windowManager.defaultDisplay.rotation
+        requestedOrientation = if (currentOrient == Configuration.ORIENTATION_LANDSCAPE) {
+            if (rot == Surface.ROTATION_270) ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+        } else {
+            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
     }
 
     override fun onResume() { super.onResume(); applySettingsToService() }
