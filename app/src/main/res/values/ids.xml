@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <item name="tv_status" type="id" />
-    <item name="gauge_view" type="id" />
-    <item name="btn_lock" type="id" />
-</resources>

@@ -142,7 +142,6 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         }
 
         gaugeView = LeanAngleGauge(this).apply {
-            id = R.id.gauge_view
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -178,7 +177,6 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         }
 
         btnLockView = createBtn(getString(R.string.btn_lock_view), "#222222", 8).apply {
-            id = R.id.btn_lock
             setOnClickListener {
                 isOrientationLocked = !isOrientationLocked
                 val bg = background as GradientDrawable
@@ -221,7 +219,6 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.START }
         }
         tvStatus = TextView(this).apply {
-            id = R.id.tv_status
             textSize = 11f
             text = getString(R.string.not_calibrated)
             setTextColor("#FF5252".toColorInt())
