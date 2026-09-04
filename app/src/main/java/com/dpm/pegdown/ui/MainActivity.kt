@@ -1,6 +1,6 @@
 package com.dpm.pegdown.ui
 
-import android.app.Activity
+import androidx.appcompat.app.AppCompatActivity
 import android.content.*
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
@@ -32,7 +32,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
 
-class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
+class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListener {
 
     private var recordingService: RecordingService? = null
     private var isBound = false
