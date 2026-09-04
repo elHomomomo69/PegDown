@@ -13,6 +13,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
 import android.view.Surface
+import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -141,6 +142,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
         }
 
         gaugeView = LeanAngleGauge(this).apply {
+            id = R.id.gauge_view
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -176,6 +178,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
         }
 
         btnLockView = createBtn(getString(R.string.btn_lock_view), "#222222", 8).apply {
+            id = R.id.btn_lock
             setOnClickListener {
                 isOrientationLocked = !isOrientationLocked
                 val bg = background as GradientDrawable
@@ -218,6 +221,7 @@ class MainActivity : Activity(), RecordingService.RecordingUpdateListener {
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply { gravity = Gravity.TOP or Gravity.START }
         }
         tvStatus = TextView(this).apply {
+            id = R.id.tv_status
             textSize = 11f
             text = getString(R.string.not_calibrated)
             setTextColor("#FF5252".toColorInt())
