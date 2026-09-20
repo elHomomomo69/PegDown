@@ -293,7 +293,7 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         return TextView(this).apply {
             textSize = if (isLandscape) 22f else 16f
-            val isLeft = grav and Gravity.START == Gravity.START
+            val isLeft = (grav and Gravity.START) == Gravity.START
             text = getString(if (isLeft) R.string.acc_format else R.string.brake_format, 0.0)
             setTextColor(if (isLeft) "#00E676".toColorInt() else "#FF3D00".toColorInt())
             gravity = Gravity.CENTER
@@ -305,14 +305,16 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
                 setStroke(1, "#333333".toColorInt())
             }
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.TOP or (if (isLeft) Gravity.START else Gravity.END)
+                
                 val h = resources.displayMetrics.heightPixels.toFloat()
                 val w = resources.displayMetrics.widthPixels.toFloat()
+                
                 if (isLandscape) {
-                    gravity = Gravity.BOTTOM or (if (isLeft) Gravity.START else Gravity.END)
-                    if (isLeft) leftMargin = 40 else rightMargin = 40
-                    bottomMargin = 40
+                    // Force them into the lower visible area (75% height)
+                    topMargin = (h * 0.75f).toInt()
+                    if (isLeft) leftMargin = 100 else rightMargin = 100
                 } else {
-                    gravity = Gravity.TOP or (if (isLeft) Gravity.START else Gravity.END)
                     val rad = w * 0.42f
                     topMargin = (h * 0.52f + rad * 0.25f + 40).toInt()
                     if (isLeft) leftMargin = 40 else rightMargin = 40
