@@ -70,7 +70,8 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
     private var isRecording = false
     private var currentRecordMode = RecordingMode.MANUAL
     private val handler = Handler(Looper.getMainLooper())
-    private var lastUIUpdateTime = 0L
+    private var lastSensorUpdateTime = 0L
+    private var lastAccelUpdateTime = 0L
 
     private var lastTourL = 0.0
     private var lastTourR = 0.0
@@ -237,8 +238,8 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         rootLayout.addView(rightC)
 
         val isLand = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        tvAccelLeft = createValueView(Gravity.TOP or Gravity.START, 24, 0)
-        tvAccelRight = createValueView(Gravity.TOP or Gravity.END, 0, 24)
+        tvAccelLeft = createValueView(Gravity.TOP or Gravity.START)
+        tvAccelRight = createValueView(Gravity.TOP or Gravity.END)
         rootLayout.addView(tvAccelLeft); rootLayout.addView(tvAccelRight)
 
         ViewCompat.setOnApplyWindowInsetsListener(rootLayout) { _, insets ->
@@ -288,11 +289,13 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    private fun createValueView(grav: Int, leftM: Int, rightM: Int): TextView {
+    private fun createValueView(grav: Int): TextView {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         return TextView(this).apply {
             textSize = if (isLandscape) 22f else 16f
-            setTextColor(if (leftM > 0) "#00E676".toColorInt() else "#FF3D00".toColorInt())
+            val isLeft = grav and Gravity.START == Gravity.START
+            text = getString(if (isLeft) R.string.acc_format else R.string.brake_format, 0.0)
+            setTextColor(if (isLeft) "#00E676".toColorInt() else "#FF3D00".toColorInt())
             gravity = Gravity.CENTER
             setPadding(14, 8, 14, 8)
             background = GradientDrawable().apply {
@@ -302,35 +305,50 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
                 setStroke(1, "#333333".toColorInt())
             }
             layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT).apply {
-                gravity = grav
                 val h = resources.displayMetrics.heightPixels.toFloat()
                 val w = resources.displayMetrics.widthPixels.toFloat()
-                val cY = if (isLandscape) h * 0.95f else h * 0.52f
-                val rad = if (isLandscape) kotlin.math.min(h * 0.82f, w * 0.38f) else kotlin.math.min(w, h * 2.2f) * 0.42f
-                topMargin = (if (isLandscape) cY - (rad * 0.15f) else (cY + (rad * 0.25f) - 30f)).toInt()
-                leftMargin = leftM; rightMargin = rightM
+                if (isLandscape) {
+                    gravity = Gravity.BOTTOM or (if (isLeft) Gravity.START else Gravity.END)
+                    if (isLeft) leftMargin = 40 else rightMargin = 40
+                    bottomMargin = 40
+                } else {
+                    gravity = Gravity.TOP or (if (isLeft) Gravity.START else Gravity.END)
+                    val rad = w * 0.42f
+                    topMargin = (h * 0.52f + rad * 0.25f + 40).toInt()
+                    if (isLeft) leftMargin = 40 else rightMargin = 40
+                }
             }
         }
     }
 
     override fun onSensorUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
         val now = System.currentTimeMillis()
-        if ((now - lastUIUpdateTime) > 16) {
+        if (now - lastSensorUpdateTime > 16) {
             gaugeView.updateData(current, tempL, tempR, tourL, tourR)
             lastTourL = tourL; lastTourR = tourR
             updateTourMax()
-            lastUIUpdateTime = now
+
+            // Synchronisiere Kalibrierungsanzeige, falls sich der Wert im Hintergrund (Auto-Zero) ändert
+            recordingService?.let { service ->
+                val offset = service.getCalibrationOffset()
+                if (offset != 0.0) {
+                    tvStatus.text = getString(R.string.calibrated_format, offset)
+                    tvStatus.setTextColor("#00E676".toColorInt())
+                }
+            }
+
+            lastSensorUpdateTime = now
         }
     }
 
     override fun onAccelUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
         val now = System.currentTimeMillis()
-        if ((now - lastUIUpdateTime) > 16) {
+        if (now - lastAccelUpdateTime > 16) {
             tvAccelLeft.text = getString(R.string.acc_format, accel)
             tvAccelRight.text = getString(R.string.brake_format, abs(brake))
             lastTourAcc = tourMaxAccel; lastTourBrake = tourMaxBrake
             updateTourMax()
-            lastUIUpdateTime = now
+            lastAccelUpdateTime = now
         }
     }
 

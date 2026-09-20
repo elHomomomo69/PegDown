@@ -41,6 +41,12 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.all {
+            it.jvmArgs("-XX:+EnableDynamicAgentLoading", "-Dnet.bytebuddy.experimental=true")
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"

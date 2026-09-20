@@ -1,5 +1,5 @@
 <resources>
-    <string name="tour_max_format">Maks. Trasy — L: %.1f° | P: %.1f° | Acc: +%.2fg | Ham: %.2fg</string>
+    <string name="tour_max_format">Maks. Trasy — L: %1$.1f° | P: %2$.1f° | Acc: +%3$.2fg | Ham: %4$.2fg</string>
     <string name="calibrated_format">Skalibrowano (%.1f°)</string>
     <string name="not_calibrated">Nieskalibrowano</string>
     <string name="acc_label">Acc</string>

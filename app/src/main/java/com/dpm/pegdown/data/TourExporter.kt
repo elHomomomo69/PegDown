@@ -19,10 +19,22 @@ class TourExporter(private val context: Context) {
 
     fun saveTourToGpx(fileName: String, recordedEntries: List<TourLogEntry>) {
         try {
-            // Pfad-Glättung anwenden (Epsilon ca. 0.00001 für minimale Abweichung)
-            val smoothedEntries = PathSmoother.smoothPath(recordedEntries, 0.00001)
+            val gpxString = generateGpxString(fileName, recordedEntries)
+            val finalFileName = if (fileName.endsWith(".gpx")) fileName else "$fileName.gpx"
+            val fileContentBytes = gpxString.toByteArray(StandardCharsets.UTF_8)
 
-            val gpxHeader = """<?xml version="1.0" encoding="UTF-8" ?>
+            saveFile(finalFileName, "application/gpx+xml", fileContentBytes)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(context, "Error saving GPX file!", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun generateGpxString(fileName: String, recordedEntries: List<TourLogEntry>): String {
+        // Pfad-Glättung anwenden (Epsilon ca. 0.00001 für minimale Abweichung)
+        val smoothedEntries = PathSmoother.smoothPath(recordedEntries, 0.00001)
+
+        val gpxHeader = """<?xml version="1.0" encoding="UTF-8" ?>
 <gpx version="1.1" creator="PegDownApp"
   xmlns="http://www.topografix.com/GPX/1/1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -31,72 +43,66 @@ class TourExporter(private val context: Context) {
     <name>${fileName.replace(".gpx", "")}</name>
     <trkseg>
 """
-            val gpxFooter = """    </trkseg>
+        val gpxFooter = """    </trkseg>
   </trk>
 </gpx>"""
 
-            val gpxContent = StringBuilder(gpxHeader)
-            for (entry in smoothedEntries) {
-                if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
+        val gpxContent = StringBuilder(gpxHeader)
+        for (entry in smoothedEntries) {
+            if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
 
-                val isoTime = entry.timestamp.replace(" ", "T") + "Z"
-                val desc = String.format(
-                    Locale.US,
-                    "Lean: L %.1f R %.1f | Accel: %.2fg | Brake: %.2fg | Speed: %.1f kmh",
-                    entry.leanAngleLeft,
-                    entry.leanAngleRight,
-                    entry.acceleration,
-                    entry.braking,
-                    entry.speed,
-                )
+            val isoTime = entry.timestamp.replace(" ", "T") + "Z"
+            val desc = String.format(
+                Locale.US,
+                "Lean: L %.1f R %.1f | Accel: %.2fg | Brake: %.2fg | Speed: %.1f kmh",
+                entry.leanAngleLeft,
+                entry.leanAngleRight,
+                entry.acceleration,
+                entry.braking,
+                entry.speed,
+            )
 
-                val entryXml = String.format(
-                    Locale.US,
-                    """      <trkpt lat="%.8f" lon="%.8f">
+            val entryXml = String.format(
+                Locale.US,
+                """      <trkpt lat="%.8f" lon="%.8f">
         <time>%s</time>
         <cmt>%s</cmt>
         <desc>%s</desc>
       </trkpt>
 """,
-                    entry.lat,
-                    entry.lon,
-                    isoTime,
-                    desc,
-                    desc,
-                )
-                gpxContent.append(entryXml)
-            }
-            gpxContent.append(gpxFooter)
-
-            val finalFileName = if (fileName.endsWith(".gpx")) fileName else "$fileName.gpx"
-            val fileContentBytes = gpxContent.toString().toByteArray(StandardCharsets.UTF_8)
-
-            saveFile(finalFileName, "application/gpx+xml", fileContentBytes)
-
-        } catch (e: Exception) {
-            e.printStackTrace()
-            Toast.makeText(context, "Error saving GPX file!", Toast.LENGTH_SHORT).show()
+                entry.lat,
+                entry.lon,
+                isoTime,
+                desc,
+                desc,
+            )
+            gpxContent.append(entryXml)
         }
+        gpxContent.append(gpxFooter)
+        return gpxContent.toString()
     }
 
     fun saveTourToCsv(fileName: String, recordedEntries: List<TourLogEntry>) {
         try {
-            val csvHeader = "Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Speed\n"
-            val csvContent = StringBuilder(csvHeader)
-
-            for (entry in recordedEntries) {
-                csvContent.append("${entry.timestamp};${entry.leanAngleLeft};${entry.leanAngleRight};${entry.acceleration};${entry.braking};${entry.lat};${entry.lon};${entry.speed}\n")
-            }
-
+            val csvString = generateCsvString(recordedEntries)
             val finalFileName = if (fileName.endsWith(".csv")) fileName else "$fileName.csv"
-            val fileContentBytes = csvContent.toString().toByteArray(StandardCharsets.UTF_8)
+            val fileContentBytes = csvString.toByteArray(StandardCharsets.UTF_8)
 
             saveFile(finalFileName, "text/csv", fileContentBytes)
-
         } catch (e: Exception) {
             e.printStackTrace()
             Toast.makeText(context, "Error saving CSV file!", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    fun generateCsvString(recordedEntries: List<TourLogEntry>): String {
+        val csvHeader = "Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Speed\n"
+        val csvContent = StringBuilder(csvHeader)
+
+        for (entry in recordedEntries) {
+            csvContent.append("${entry.timestamp};${entry.leanAngleLeft};${entry.leanAngleRight};${entry.acceleration};${entry.braking};${entry.lat};${entry.lon};${entry.speed}\n")
+        }
+        return csvContent.toString()
     }
 
     private fun saveFile(fileName: String, mimeType: String, content: ByteArray) {

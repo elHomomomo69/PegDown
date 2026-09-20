@@ -97,7 +97,7 @@ class SensorProcessor(
         notifyUpdates()
     }
 
-    private fun checkAutoZero(currentAngle: Double) {
+    internal fun checkAutoZero(currentAngle: Double) {
         if ((currentSpeedKmH > autoZeroMinSpeed) && (abs(currentAngle) < autoZeroThresholdAngle)) {
             if (straightDriveStartTime == 0L) {
                 straightDriveStartTime = System.currentTimeMillis()

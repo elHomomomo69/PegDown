@@ -34,30 +34,58 @@ class SensorProcessorTest {
     }
 
     @Test
-    fun `calibrate sets calibrationOffset to current smoothedTilt`() {
-        // Given: We simulate some raw tilt detected by sensors
-        // Since we can't easily trigger handleGravity directly without reflecting private fields,
-        // we'll at least test that calibrate updates based on the current state.
-        
-        // Manual "injection" of state for testing if possible, 
-        // or testing the public behavior of calibrate()
-        
+    fun `calibrate sets calibrationOffset to current state`() {
         sensorProcessor.calibrate()
-        
-        // After calibrate, the initial offset should be 0.0 if no tilt was processed
         assertEquals(0.0, sensorProcessor.calibrationOffset, 0.1)
     }
 
     @Test
-    fun `resetTour clears all maximum values`() {
+    fun `resetTour clears all peak values`() {
         sensorProcessor.maxTourLeft = -45.0
         sensorProcessor.maxTourRight = 30.0
         sensorProcessor.tourMaxAccel = 0.8
+        sensorProcessor.tourMaxBrake = -0.5
         
         sensorProcessor.resetTour()
         
         assertEquals(0.0, sensorProcessor.maxTourLeft, 0.0)
         assertEquals(0.0, sensorProcessor.maxTourRight, 0.0)
         assertEquals(0.0, sensorProcessor.tourMaxAccel, 0.0)
+        assertEquals(0.0, sensorProcessor.tourMaxBrake, 0.0)
+    }
+
+    @Test
+    fun `auto-zero adjusts calibrationOffset after 10 seconds of straight riding`() {
+        mockkStatic(System::class)
+        
+        // Step 1: Start driving straight at 50 km/h
+        sensorProcessor.currentSpeedKmH = 50.0
+        every { System.currentTimeMillis() } returns 1000L
+        sensorProcessor.checkAutoZero(1.0) // 1 degree tilt while "straight"
+        
+        // Step 2: 5 seconds later (still straight)
+        every { System.currentTimeMillis() } returns 6000L
+        sensorProcessor.checkAutoZero(1.0)
+        assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001) // No correction yet
+        
+        // Step 3: 11 seconds total elapsed
+        every { System.currentTimeMillis() } returns 12000L
+        sensorProcessor.checkAutoZero(1.0)
+        
+        // Should have adjusted: offset += 1.0 * 0.01 = 0.01
+        assertEquals(0.01, sensorProcessor.calibrationOffset, 0.001)
+    }
+
+    @Test
+    fun `auto-zero does not adjust when speed is low`() {
+        mockkStatic(System::class)
+        sensorProcessor.currentSpeedKmH = 30.0 // Below threshold
+        every { System.currentTimeMillis() } returns 1000L
+        
+        sensorProcessor.checkAutoZero(1.0)
+        every { System.currentTimeMillis() } returns 12000L
+        sensorProcessor.checkAutoZero(1.0)
+        
+        assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001)
     }
 }

@@ -1,5 +1,5 @@
 <resources>
-    <string name="tour_max_format">ツアー最大 — 左: %.1f° | 右: %.1f° | 加速: +%.2fg | ブレーキ: %.2fg</string>
+    <string name="tour_max_format">ツアー最大 — 左: %1$.1f° | 右: %2$.1f° | 加速: +%3$.2fg | ブレーキ: %4$.2fg</string>
     <string name="calibrated_format">校正済み (%.1f°)</string>
     <string name="not_calibrated">未校正</string>
     <string name="acc_label">加速</string>

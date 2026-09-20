@@ -1,5 +1,5 @@
 <resources>
-    <string name="tour_max_format">骑行之最 — 左: %.1f° | 右: %.1f° | 加速: +%.2fg | 刹车: %.2fg</string>
+    <string name="tour_max_format">骑行之最 — 左: %1$.1f° | 右: %2$.1f° | 加速: +%3$.2fg | 刹车: %4$.2fg</string>
     <string name="calibrated_format">已校准 (%.1f°)</string>
     <string name="not_calibrated">未校准</string>
     <string name="acc_label">加速</string>

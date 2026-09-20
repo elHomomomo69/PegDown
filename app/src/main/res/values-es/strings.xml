@@ -1,5 +1,5 @@
 <resources>
-    <string name="tour_max_format">Tour Máx — I: %.1f° | D: %.1f° | Acc: +%.2fg | Freno: %.2fg</string>
+    <string name="tour_max_format">Tour Máx — I: %1$.1f° | D: %2$.1f° | Acc: +%3$.2fg | Freno: %4$.2fg</string>
     <string name="calibrated_format">Calibrado (%.1f°)</string>
     <string name="not_calibrated">No calibrado</string>
     <string name="acc_label">Acc</string>
