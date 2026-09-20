@@ -148,11 +148,11 @@ class SensorProcessor(
         val y = event.values[1]
         val z = event.values[2]
 
-        val rotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            context.display?.rotation ?: Surface.ROTATION_0
-        } else {
+        val rotation = try {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.rotation
+        } catch (_: Exception) {
+            Surface.ROTATION_0
         }
 
         val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
