@@ -15,7 +15,7 @@ class CsvExportTest {
     @Test
     fun `generateCsvString contains correct header`() {
         val csv = tourExporter.generateCsvString(emptyList())
-        assertTrue(csv.startsWith("Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Speed"))
+        assertTrue(csv.startsWith("Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Altitude;Speed"))
     }
 
     @Test
@@ -28,6 +28,7 @@ class CsvExportTest {
             braking = -0.1,
             lat = 52.5,
             lon = 13.4,
+            altitude = 173.0,
             speed = 80.0
         )
 
@@ -35,6 +36,6 @@ class CsvExportTest {
         val lines = csv.trim().split("\n")
         
         assertEquals(2, lines.size) // Header + 1 Data line
-        assertEquals("2024-01-01 12:00:00;12.5;0.0;0.2;-0.1;52.5;13.4;80.0", lines[1])
+        assertEquals("2024-01-01 12:00:00;12.5;0.0;0.2;-0.1;52.5;13.4;173.0;80.0", lines[1])
     }
 }

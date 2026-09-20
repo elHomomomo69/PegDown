@@ -32,6 +32,7 @@ class GpxExportTest {
             braking = -0.10,
             lat = 52.5200,
             lon = 13.4050,
+            altitude = 173.0,
             speed = 65.0
         )
         
@@ -40,6 +41,7 @@ class GpxExportTest {
         // Check if lat/lon are in the XML
         assertTrue(gpx.contains("lat=\"52.52000000\""))
         assertTrue(gpx.contains("lon=\"13.40500000\""))
+        assertTrue(gpx.contains("<ele>173.0</ele>"))
         
         // Check if the description (lean/accel) is present in <cmt>
         assertTrue(gpx.contains("<cmt>Lean: L 25.5 R 0.0 | Accel: 0.15g | Brake: -0.10g | Speed: 65.0 kmh</cmt>"))
@@ -55,6 +57,7 @@ class GpxExportTest {
             braking = 0.0,
             lat = lat,
             lon = lon,
+            altitude = 150.0,
             speed = 50.0
         )
     }

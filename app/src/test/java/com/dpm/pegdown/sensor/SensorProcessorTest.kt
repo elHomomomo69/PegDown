@@ -28,6 +28,11 @@ class SensorProcessorTest {
         
         every { context.getSystemService(Context.SENSOR_SERVICE) } returns sensorManager
         every { context.getSystemService(Context.WINDOW_SERVICE) } returns windowManager
+        
+        // Modern way (API 30+)
+        every { context.display } returns display
+        // Fallback for older APIs (still needed for the deprecated branch in code)
+        @Suppress("DEPRECATION")
         every { windowManager.defaultDisplay } returns display
         
         sensorProcessor = SensorProcessor(context, listener)
@@ -56,20 +61,20 @@ class SensorProcessorTest {
 
     @Test
     fun `auto-zero adjusts calibrationOffset after 10 seconds of straight riding`() {
-        mockkStatic(System::class)
+        var simulatedTime = 1000L
+        sensorProcessor.timeProvider = { simulatedTime }
         
         // Step 1: Start driving straight at 50 km/h
         sensorProcessor.currentSpeedKmH = 50.0
-        every { System.currentTimeMillis() } returns 1000L
         sensorProcessor.checkAutoZero(1.0) // 1 degree tilt while "straight"
         
         // Step 2: 5 seconds later (still straight)
-        every { System.currentTimeMillis() } returns 6000L
+        simulatedTime = 6000L
         sensorProcessor.checkAutoZero(1.0)
         assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001) // No correction yet
         
         // Step 3: 11 seconds total elapsed
-        every { System.currentTimeMillis() } returns 12000L
+        simulatedTime = 12000L
         sensorProcessor.checkAutoZero(1.0)
         
         // Should have adjusted: offset += 1.0 * 0.01 = 0.01
@@ -78,12 +83,12 @@ class SensorProcessorTest {
 
     @Test
     fun `auto-zero does not adjust when speed is low`() {
-        mockkStatic(System::class)
+        var simulatedTime = 1000L
+        sensorProcessor.timeProvider = { simulatedTime }
         sensorProcessor.currentSpeedKmH = 30.0 // Below threshold
-        every { System.currentTimeMillis() } returns 1000L
         
         sensorProcessor.checkAutoZero(1.0)
-        every { System.currentTimeMillis() } returns 12000L
+        simulatedTime = 12000L
         sensorProcessor.checkAutoZero(1.0)
         
         assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001)

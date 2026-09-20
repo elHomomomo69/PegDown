@@ -9,5 +9,6 @@ data class TourLogEntry(
     val braking: Double,
     val lat: Double,
     val lon: Double,
+    val altitude: Double,
     val speed: Double
 )

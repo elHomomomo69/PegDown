@@ -1,0 +1,1 @@
+Filtrado de vibraciones mejorado, HUD optimizado para modo horizontal y exportación GPX más limpia.

@@ -1,0 +1,1 @@
+Enhanced vibration filtering for G-forces, optimized HUD for landscape mode, and cleaned up GPX export redundancy.

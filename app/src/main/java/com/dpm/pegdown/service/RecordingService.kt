@@ -114,6 +114,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     override fun onLocationUpdate(location: Location, speedKmH: Double) {
         sensorProcessor.currentLatitude = location.latitude
         sensorProcessor.currentLongitude = location.longitude
+        sensorProcessor.currentAltitude = location.altitude
         sensorProcessor.currentSpeedKmH = speedKmH
         uiListener?.onLocationUpdate(location, speedKmH)
     }

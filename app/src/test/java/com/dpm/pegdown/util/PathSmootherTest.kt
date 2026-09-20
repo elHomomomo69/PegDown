@@ -50,6 +50,7 @@ class PathSmootherTest {
             braking = 0.0,
             lat = lat,
             lon = lon,
+            altitude = 150.0,
             speed = 50.0
         )
     }

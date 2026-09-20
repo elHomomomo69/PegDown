@@ -1,0 +1,1 @@
+Ulepszone filtrowanie wibracji, zoptymalizowany interfejs w trybie poziomym i odchudzony eksport GPX.

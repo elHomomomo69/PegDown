@@ -58,6 +58,7 @@ class SensorProcessor(
     var isRecording = false
     var currentLatitude = 0.0
     var currentLongitude = 0.0
+    var currentAltitude = 0.0
     var currentSpeedKmH = 0.0
     private var lastValidLat = 0.0
     private var lastValidLon = 0.0
@@ -98,9 +99,9 @@ class SensorProcessor(
     internal fun checkAutoZero(currentAngle: Double) {
         if ((currentSpeedKmH > autoZeroMinSpeed) && (abs(currentAngle) < autoZeroThresholdAngle)) {
             if (straightDriveStartTime == 0L) {
-                straightDriveStartTime = System.currentTimeMillis()
+                straightDriveStartTime = timeProvider()
             } else {
-                val elapsed = System.currentTimeMillis() - straightDriveStartTime
+                val elapsed = timeProvider() - straightDriveStartTime
                 if (elapsed > autoZeroDurationMs) {
                     // Sanftes Nachjustieren: 0.1 Grad Korrektur pro Update
                     calibrationOffset += (currentAngle * 0.01)
@@ -117,6 +118,7 @@ class SensorProcessor(
     private val autoZeroThresholdAngle = 2.0 // Grad
     private val autoZeroMinSpeed = 40.0 // km/h
     private val autoZeroDurationMs = 10000L // 10 Sekunden
+    internal var timeProvider: () -> Long = { System.currentTimeMillis() }
 
     private fun notifyUpdates() {
         val calculatedAngle = smoothedTilt - calibrationOffset
@@ -143,9 +145,7 @@ class SensorProcessor(
         val z = event.values[2]
 
         val rotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            // Using windowManager for broader compatibility in separate class
-            @Suppress("DEPRECATION")
-            windowManager.defaultDisplay.rotation
+            context.display?.rotation ?: Surface.ROTATION_0
         } else {
             @Suppress("DEPRECATION")
             windowManager.defaultDisplay.rotation
@@ -284,6 +284,7 @@ class SensorProcessor(
             braking = maxBraking,
             lat = currentLatitude,
             lon = currentLongitude,
+            altitude = currentAltitude,
             speed = currentSpeedKmH,
         )
         listener.onPeakRecorded(entry)

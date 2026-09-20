@@ -65,12 +65,14 @@ class TourExporter(private val context: Context) {
             val entryXml = String.format(
                 Locale.US,
                 """      <trkpt lat="%.8f" lon="%.8f">
+        <ele>%.1f</ele>
         <time>%s</time>
         <cmt>%s</cmt>
       </trkpt>
 """,
                 entry.lat,
                 entry.lon,
+                entry.altitude,
                 isoTime,
                 desc,
             )
@@ -94,11 +96,11 @@ class TourExporter(private val context: Context) {
     }
 
     fun generateCsvString(recordedEntries: List<TourLogEntry>): String {
-        val csvHeader = "Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Speed\n"
+        val csvHeader = "Timestamp;LeanAngleLeft;LeanAngleRight;Acceleration;Braking;Latitude;Longitude;Altitude;Speed\n"
         val csvContent = StringBuilder(csvHeader)
 
         for (entry in recordedEntries) {
-            csvContent.append("${entry.timestamp};${entry.leanAngleLeft};${entry.leanAngleRight};${entry.acceleration};${entry.braking};${entry.lat};${entry.lon};${entry.speed}\n")
+            csvContent.append("${entry.timestamp};${entry.leanAngleLeft};${entry.leanAngleRight};${entry.acceleration};${entry.braking};${entry.lat};${entry.lon};${entry.altitude};${entry.speed}\n")
         }
         return csvContent.toString()
     }
