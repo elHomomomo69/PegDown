@@ -28,6 +28,10 @@ class SensorProcessor(
     private var tempResetRunnable: Runnable? = null
     private var accelResetRunnable: Runnable? = null
 
+    private val gpxDateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }
+
     // Settings
     var resetDurationMillis: Long = 7000L
     var smoothingAlpha: Double = 0.07
@@ -256,9 +260,15 @@ class SensorProcessor(
         notifyUpdates()
     }
 
+    fun recordCurrentState() {
+        if (isRecording) {
+            recordEntry()
+        }
+    }
+
     private fun recordEntry() {
         // GPS Plausibility Check: Ignore spikes or impossible movement
-        val now = System.currentTimeMillis()
+        val now = timeProvider()
         if (lastValidTime != 0L) {
             val dist = calculateDistance(lastValidLat, lastValidLon, currentLatitude, currentLongitude)
             val timeSec = (now - lastValidTime) / 1000.0
@@ -277,7 +287,7 @@ class SensorProcessor(
         val rightVal = if (lastPeakLeanAngle > 0) abs(lastPeakLeanAngle) else 0.0
 
         val entry = TourLogEntry(
-            timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()),
+            timestamp = gpxDateFormat.format(Date(now)),
             leanAngleLeft = leftVal,
             leanAngleRight = rightVal,
             acceleration = maxAcceleration,

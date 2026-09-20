@@ -72,10 +72,12 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         isRecording = true
         sensorProcessor.isRecording = true
         recordedEntries.clear()
+        sensorProcessor.recordCurrentState() // Record start point
         startForeground(1, createNotification("PegDown: Recording active"))
     }
 
     fun stopTourRecording() {
+        sensorProcessor.recordCurrentState() // Record end point
         isRecording = false
         sensorProcessor.isRecording = false
         stopForeground(STOP_FOREGROUND_REMOVE)
