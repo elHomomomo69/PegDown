@@ -67,13 +67,11 @@ class TourExporter(private val context: Context) {
                 """      <trkpt lat="%.8f" lon="%.8f">
         <time>%s</time>
         <cmt>%s</cmt>
-        <desc>%s</desc>
       </trkpt>
 """,
                 entry.lat,
                 entry.lon,
                 isoTime,
-                desc,
                 desc,
             )
             gpxContent.append(entryXml)

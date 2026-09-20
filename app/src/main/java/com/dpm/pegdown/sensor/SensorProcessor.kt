@@ -12,9 +12,7 @@ import android.view.WindowManager
 import com.dpm.pegdown.model.TourLogEntry
 import java.text.SimpleDateFormat
 import java.util.*
-import kotlin.math.abs
-import kotlin.math.atan2
-import kotlin.math.sqrt
+import kotlin.math.*
 
 class SensorProcessor(
     private val context: Context,
@@ -52,18 +50,18 @@ class SensorProcessor(
     var maxBraking = 0.0
     var tourMaxAccel = 0.0
     var tourMaxBrake = 0.0
+    private var smoothedAccel = 0.0
+    private var smoothedBrake = 0.0
+    private val accelSmoothingAlpha = 0.15 // Fast reaction but filters vibration
 
     // External state needed for recording
     var isRecording = false
     var currentLatitude = 0.0
     var currentLongitude = 0.0
     var currentSpeedKmH = 0.0
-
-    // Auto-Zero logic
-    private var straightDriveStartTime = 0L
-    private val autoZeroThresholdAngle = 2.0 // Grad
-    private val autoZeroMinSpeed = 40.0 // km/h
-    private val autoZeroDurationMs = 10000L // 10 Sekunden
+    private var lastValidLat = 0.0
+    private var lastValidLon = 0.0
+    private var lastValidTime = 0L
 
     fun start() {
         sensorStartupCounter = 0
@@ -113,6 +111,12 @@ class SensorProcessor(
             straightDriveStartTime = 0L
         }
     }
+
+    // Auto-Zero logic
+    private var straightDriveStartTime = 0L
+    private val autoZeroThresholdAngle = 2.0 // Grad
+    private val autoZeroMinSpeed = 40.0 // km/h
+    private val autoZeroDurationMs = 10000L // 10 Sekunden
 
     private fun notifyUpdates() {
         val calculatedAngle = smoothedTilt - calibrationOffset
@@ -209,16 +213,25 @@ class SensorProcessor(
         val isLandscape = context.resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
         val rawAccel = if (isLandscape) y else x
 
-        var forwardAcceleration = (rawAccel / 9.81)
-        if (abs(forwardAcceleration) < 0.04) forwardAcceleration = 0.0
+        var currentForwardG = (rawAccel / 9.81)
+        if (abs(currentForwardG) < 0.05) currentForwardG = 0.0
+
+        // Filter vibrations
+        if (currentForwardG >= 0) {
+            smoothedAccel += accelSmoothingAlpha * (currentForwardG - smoothedAccel)
+            smoothedBrake = 0.0
+        } else {
+            smoothedBrake += accelSmoothingAlpha * (currentForwardG - smoothedBrake)
+            smoothedAccel = 0.0
+        }
 
         var newAccelPeak = false
-        if (forwardAcceleration > maxAcceleration) {
-            maxAcceleration = forwardAcceleration
+        if (smoothedAccel > maxAcceleration && smoothedAccel < 2.0) {
+            maxAcceleration = smoothedAccel
             newAccelPeak = true
         }
-        if (forwardAcceleration < maxBraking) {
-            maxBraking = forwardAcceleration
+        if (smoothedBrake < maxBraking && smoothedBrake > -2.0) {
+            maxBraking = smoothedBrake
             newAccelPeak = true
         }
 
@@ -231,7 +244,7 @@ class SensorProcessor(
 
             accelResetRunnable?.let { handler.removeCallbacks(it) }
             accelResetRunnable = Runnable {
-                if (isRecording && (abs(lastPeakLeanAngle) > 0.5 || peakAccelToSave > 0.05 || abs(peakBrakeToSave) > 0.05)) {
+                if (isRecording && (abs(lastPeakLeanAngle) > 1.0 || peakAccelToSave > 0.1 || abs(peakBrakeToSave) > 0.1)) {
                     recordEntry()
                 }
                 maxAcceleration = 0.0
@@ -244,6 +257,22 @@ class SensorProcessor(
     }
 
     private fun recordEntry() {
+        // GPS Plausibility Check: Ignore spikes or impossible movement
+        val now = System.currentTimeMillis()
+        if (lastValidTime != 0L) {
+            val dist = calculateDistance(lastValidLat, lastValidLon, currentLatitude, currentLongitude)
+            val timeSec = (now - lastValidTime) / 1000.0
+            if (timeSec > 0) {
+                val speedCheck = (dist / timeSec) * 3.6 // km/h
+                // If calculated speed between points is > 300 km/h, it's likely a GPS jump
+                if (speedCheck > 300.0) return 
+            }
+        }
+        
+        lastValidLat = currentLatitude
+        lastValidLon = currentLongitude
+        lastValidTime = now
+
         val leftVal = if (lastPeakLeanAngle < 0) abs(lastPeakLeanAngle) else 0.0
         val rightVal = if (lastPeakLeanAngle > 0) abs(lastPeakLeanAngle) else 0.0
 
@@ -258,5 +287,14 @@ class SensorProcessor(
             speed = currentSpeedKmH,
         )
         listener.onPeakRecorded(entry)
+    }
+
+    private fun calculateDistance(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val r = 6371000.0 // Earth radius in meters
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2).pow(2.0) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2.0)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return r * c
     }
 }

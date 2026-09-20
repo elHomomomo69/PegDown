@@ -41,9 +41,9 @@ class GpxExportTest {
         assertTrue(gpx.contains("lat=\"52.52000000\""))
         assertTrue(gpx.contains("lon=\"13.40500000\""))
         
-        // Check if the description (lean/accel) is present in <cmt> and <desc>
+        // Check if the description (lean/accel) is present in <cmt>
         assertTrue(gpx.contains("<cmt>Lean: L 25.5 R 0.0 | Accel: 0.15g | Brake: -0.10g | Speed: 65.0 kmh</cmt>"))
-        assertTrue(gpx.contains("<desc>Lean: L 25.5 R 0.0 | Accel: 0.15g | Brake: -0.10g | Speed: 65.0 kmh</desc>"))
+        // <desc> was removed for redundancy
     }
 
     private fun createEntry(lat: Double, lon: Double): TourLogEntry {

@@ -13,7 +13,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
 import android.view.Surface
-import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -31,6 +30,7 @@ import com.dpm.pegdown.util.LocaleHelper
 import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
+import androidx.core.view.isNotEmpty
 
 class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListener {
 
@@ -81,6 +81,13 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
     override fun attachBaseContext(newBase: Context) {
         val manager = SettingsManager(newBase)
         super.attachBaseContext(LocaleHelper.wrapContext(newBase, manager.selectedLanguage))
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Refresh UI positioning on rotation
+        setupUI()
+        applySettingsToService()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -134,6 +141,12 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
     }
 
     private fun setupUI() {
+        // Clear previous views if setupUI is called again on rotation
+        val contentView = findViewById<android.view.ViewGroup>(android.R.id.content)
+        if (contentView != null && contentView.isNotEmpty()) {
+            contentView.removeAllViews()
+        }
+
         val rootLayout = FrameLayout(this).apply {
             setBackgroundColor("#000000".toColorInt())
             layoutParams = FrameLayout.LayoutParams(
