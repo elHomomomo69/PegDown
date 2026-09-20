@@ -101,15 +101,21 @@ class SensorProcessor(
     }
 
     internal fun checkAutoZero(currentAngle: Double) {
+        val now = timeProvider()
+        // Safety: Do not calibrate if we had high G-forces (turns/braking) in the last 20 seconds
+        if (now - lastHighGTime < 20000) {
+            straightDriveStartTime = 0L
+            return
+        }
+
         if ((currentSpeedKmH > autoZeroMinSpeed) && (abs(currentAngle) < autoZeroThresholdAngle)) {
             if (straightDriveStartTime == 0L) {
-                straightDriveStartTime = timeProvider()
+                straightDriveStartTime = now
             } else {
-                val elapsed = timeProvider() - straightDriveStartTime
+                val elapsed = now - straightDriveStartTime
                 if (elapsed > autoZeroDurationMs) {
-                    // Sanftes Nachjustieren: 0.1 Grad Korrektur pro Update
-                    calibrationOffset += (currentAngle * 0.01)
-                    // Wir setzen den Timer nicht zurück, um kontinuierlich sanft zu korrigieren
+                    // Extremely gentle adjustment
+                    calibrationOffset += (currentAngle * 0.005)
                 }
             }
         } else {
@@ -119,9 +125,10 @@ class SensorProcessor(
 
     // Auto-Zero logic
     private var straightDriveStartTime = 0L
-    private val autoZeroThresholdAngle = 2.0 // Grad
+    private var lastHighGTime = 0L
+    private val autoZeroThresholdAngle = 1.0 // Strenger: 1 Grad
     private val autoZeroMinSpeed = 40.0 // km/h
-    private val autoZeroDurationMs = 10000L // 10 Sekunden
+    private val autoZeroDurationMs = 15000L // Länger warten: 15 Sekunden
     internal var timeProvider: () -> Long = { System.currentTimeMillis() }
 
     private fun notifyUpdates() {
@@ -174,6 +181,11 @@ class SensorProcessor(
 
         val calculatedAngle = smoothedTilt - calibrationOffset
         val finalAngle = kotlin.math.round(calculatedAngle / 0.1) * 0.1
+
+        // Track when we have significant lean to pause Auto-Zero
+        if (abs(finalAngle) > 5.0) {
+            lastHighGTime = timeProvider()
+        }
 
         checkAutoZero(finalAngle)
 
@@ -237,6 +249,12 @@ class SensorProcessor(
         if (smoothedBrake < maxBraking && smoothedBrake > -2.0) {
             maxBraking = smoothedBrake
             newAccelPeak = true
+        }
+
+        // Track when we have significant forces to pause Auto-Zero
+        // Use rawTilt or a basic angle check here since finalAngle is only in handleGravity
+        if (abs(currentForwardG) > 0.3) {
+            lastHighGTime = timeProvider()
         }
 
         if (maxAcceleration > tourMaxAccel) tourMaxAccel = maxAcceleration

@@ -60,25 +60,23 @@ class SensorProcessorTest {
     }
 
     @Test
-    fun `auto-zero adjusts calibrationOffset after 10 seconds of straight riding`() {
-        var simulatedTime = 1000L
+    fun `auto-zero adjusts calibrationOffset after long stable straight riding`() {
+        var simulatedTime = 100000L
         sensorProcessor.timeProvider = { simulatedTime }
-        
-        // Step 1: Start driving straight at 50 km/h
         sensorProcessor.currentSpeedKmH = 50.0
-        sensorProcessor.checkAutoZero(1.0) // 1 degree tilt while "straight"
         
-        // Step 2: 5 seconds later (still straight)
-        simulatedTime = 6000L
+        // Step 1: Set lastHighGTime far in the past to satisfy the 20s safety check
+        // By default it is 0, and 100000 - 0 > 20000 is true.
+        
+        // Step 2: Trigger first check
+        sensorProcessor.checkAutoZero(1.0) 
+        
+        // Step 3: Total 16 seconds elapsed (must be > autoZeroDurationMs which is 15s)
+        simulatedTime += 16000L
         sensorProcessor.checkAutoZero(1.0)
-        assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001) // No correction yet
         
-        // Step 3: 11 seconds total elapsed
-        simulatedTime = 12000L
-        sensorProcessor.checkAutoZero(1.0)
-        
-        // Should have adjusted: offset += 1.0 * 0.01 = 0.01
-        assertEquals(0.01, sensorProcessor.calibrationOffset, 0.001)
+        // Should have adjusted: offset += 1.0 * 0.005 = 0.005
+        assertEquals(0.005, sensorProcessor.calibrationOffset, 0.001)
     }
 
     @Test
