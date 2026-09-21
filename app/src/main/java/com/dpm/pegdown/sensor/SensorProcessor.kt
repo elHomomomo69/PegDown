@@ -40,7 +40,6 @@ class SensorProcessor(
     // Fusion State
     private var lastFusionTimestamp = 0L
     private var currentFusedAngle = 0.0 
-    private val filterCoefficient = 0.98 // 98% Gyro, 2% Accel - The Industry Standard
     
     // Physical state
     var calibrationOffset = 0.0
@@ -179,13 +178,19 @@ class SensorProcessor(
             currentFusedAngle = accelAngle
             sensorStartupCounter++
         } else {
-            // Apply Complementary Filter: High trust in Gyro, slow drift correction with Accel
-            // Weighting only happens when not in a heavy kurve (totalG close to 1.0)
+            // Check for stability: Magnitude of total acceleration (including gravity)
             val totalG = sqrt((x * x + y * y + z * z).toDouble()) / 9.81
-            val isStable = abs(totalG - 1.0) < 0.1
+            
+            // Only trust accelerometer when force is close to 1.0g (stable riding or standstill)
+            // This prevents "bleeding" from up/down movement and centrifugal drift in curves
+            val isStable = abs(totalG - 1.0) < 0.05
             
             if (isStable) {
-                currentFusedAngle = filterCoefficient * currentFusedAngle + (1.0 - filterCoefficient) * accelAngle
+                // Complementary filter: The weighting is now adjustable via settings
+                // smoothingAlpha (0.01 - 0.50) is mapped to trust in gyro (0.95 - 0.999)
+                // Low alpha = 0.999 (extremely stable), High alpha = 0.95 (very direct)
+                val dynamicFilterCoeff = 1.0 - (smoothingAlpha / 10.0).coerceIn(0.001, 0.05)
+                currentFusedAngle = dynamicFilterCoeff * currentFusedAngle + (1.0 - dynamicFilterCoeff) * accelAngle
             }
         }
         processLeanAngle()
