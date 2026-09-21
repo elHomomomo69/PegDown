@@ -19,7 +19,7 @@
             android:name=".ui.MainActivity"
             android:exported="true"
             android:theme="@style/Theme.PegDown"
-            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize"
+            android:configChanges="screenSize|screenLayout|smallestScreenSize"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

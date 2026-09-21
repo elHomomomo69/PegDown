@@ -31,6 +31,7 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import kotlin.math.abs
 import androidx.core.view.isNotEmpty
+import android.view.OrientationEventListener
 
 class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListener {
 
@@ -77,6 +78,8 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
     private var lastTourR = 0.0
     private var lastTourAcc = 0.0
     private var lastTourBrake = 0.0
+    private var lastKnownOrientation = Configuration.ORIENTATION_UNDEFINED
+    private var orientationEventListener: OrientationEventListener? = null
 
     override fun attachBaseContext(newBase: Context) {
         val manager = SettingsManager(newBase)
@@ -102,6 +105,23 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         startService(serviceIntent)
 
         setupUI()
+        setupOrientationListener()
+    }
+
+    private fun setupOrientationListener() {
+        orientationEventListener = object : OrientationEventListener(this) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN || isOrientationLocked) return
+                
+                val currentOrient = resources.configuration.orientation
+                if (currentOrient != lastKnownOrientation) {
+                    lastKnownOrientation = currentOrient
+                    setupUI()
+                    applySettingsToService()
+                }
+            }
+        }
+        orientationEventListener?.enable()
     }
 
     private fun checkPermissions() {
@@ -199,7 +219,7 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
                     text = getString(R.string.btn_locked)
                     bg.setColor("#FF1744".toColorInt())
                 } else {
-                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
                     text = getString(R.string.btn_lock_view)
                     bg.setColor("#222222".toColorInt())
                 }
@@ -297,6 +317,9 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
             bottomMargin = (80 * density).toInt()
         })
+
+        // Force orientation check on legacy devices (API 28)
+        lastKnownOrientation = resources.configuration.orientation
 
         setContentView(rootLayout)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -402,7 +425,11 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
                 requestedOrientation = orient
                 (btnLockView.background as GradientDrawable).setColor("#FF1744".toColorInt())
                 btnLockView.text = getString(R.string.btn_locked)
+            } else {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
             }
+        } else if (!isOrientationLocked) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR
         }
     }
 
@@ -498,6 +525,11 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
         } else {
             ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        orientationEventListener?.disable()
     }
 
     override fun onResume() { super.onResume(); applySettingsToService() }
