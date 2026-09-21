@@ -65,29 +65,29 @@ class SensorProcessorTest {
         sensorProcessor.timeProvider = { simulatedTime }
         sensorProcessor.currentSpeedKmH = 50.0
         
-        // Step 1: Set lastHighGTime far in the past to satisfy the 20s safety check
-        // By default it is 0, and 100000 - 0 > 20000 is true.
+        // Initial check - should initialize straightDriveStartTime
+        // Angle must be < autoZeroThresholdAngle (1.0)
+        sensorProcessor.checkAutoZero(0.5) 
         
-        // Step 2: Trigger first check
-        sensorProcessor.checkAutoZero(1.0) 
-        
-        // Step 3: Total 16 seconds elapsed (must be > autoZeroDurationMs which is 15s)
+        // Advance time by 16 seconds (must be > autoZeroDurationMs which is 15s)
         simulatedTime += 16000L
-        sensorProcessor.checkAutoZero(1.0)
         
-        // Should have adjusted: offset += 1.0 * 0.005 = 0.005
-        assertEquals(0.005, sensorProcessor.calibrationOffset, 0.001)
+        // Second check - should trigger the correction
+        sensorProcessor.checkAutoZero(0.5)
+        
+        // offset += currentAngle * 0.005 -> 0.5 * 0.005 = 0.0025
+        assertEquals(0.0025, sensorProcessor.calibrationOffset, 0.0001)
     }
 
     @Test
     fun `auto-zero does not adjust when speed is low`() {
-        var simulatedTime = 1000L
+        var simulatedTime = 100000L
         sensorProcessor.timeProvider = { simulatedTime }
-        sensorProcessor.currentSpeedKmH = 30.0 // Below threshold
+        sensorProcessor.currentSpeedKmH = 30.0 // Below threshold (40.0)
         
-        sensorProcessor.checkAutoZero(1.0)
-        simulatedTime = 12000L
-        sensorProcessor.checkAutoZero(1.0)
+        sensorProcessor.checkAutoZero(0.5)
+        simulatedTime += 16000L
+        sensorProcessor.checkAutoZero(0.5)
         
         assertEquals(0.0, sensorProcessor.calibrationOffset, 0.001)
     }
