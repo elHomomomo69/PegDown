@@ -70,8 +70,8 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
     private var isRecording = false
     private var currentRecordMode = RecordingMode.MANUAL
     private val handler = Handler(Looper.getMainLooper())
-    private var lastSensorUpdateTime = 0L
-    private var lastAccelUpdateTime = 0L
+    private var lastGlobalUIUpdateTime = 0L
+    private val UI_UPDATE_INTERVAL_MS = 16L // Target ~60Hz
 
     private var lastTourL = 0.0
     private var lastTourR = 0.0
@@ -338,7 +338,7 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
 
     override fun onSensorUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastSensorUpdateTime > 16) {
+        if (now - lastGlobalUIUpdateTime >= UI_UPDATE_INTERVAL_MS) {
             gaugeView.updateData(current, tempL, tempR, tourL, tourR)
             lastTourL = tourL; lastTourR = tourR
             updateTourMax()
@@ -352,18 +352,18 @@ class MainActivity : AppCompatActivity(), RecordingService.RecordingUpdateListen
                 }
             }
 
-            lastSensorUpdateTime = now
+            lastGlobalUIUpdateTime = now
         }
     }
 
     override fun onAccelUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
         val now = System.currentTimeMillis()
-        if (now - lastAccelUpdateTime > 16) {
+        if (now - lastGlobalUIUpdateTime >= UI_UPDATE_INTERVAL_MS) {
             tvAccelLeft.text = getString(R.string.acc_format, accel)
             tvAccelRight.text = getString(R.string.brake_format, abs(brake))
             lastTourAcc = tourMaxAccel; lastTourBrake = tourMaxBrake
             updateTourMax()
-            lastAccelUpdateTime = now
+            lastGlobalUIUpdateTime = now
         }
     }
 
