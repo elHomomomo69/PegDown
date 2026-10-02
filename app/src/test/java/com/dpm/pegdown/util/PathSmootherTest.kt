@@ -25,26 +25,67 @@ class PathSmootherTest {
     }
 
     @Test
-    fun `smoothPath keeps corner points`() {
-        val cornerPath = listOf(
-            createEntry(52.0, 13.0),
-            createEntry(52.1, 13.0),
-            createEntry(52.2, 13.1),
-            createEntry(52.1, 13.2),
-            createEntry(52.0, 13.2)
-        )
+    fun `simplifyTrack removes redundant points on a straight route`() {
+        val straightTrack = (0..10).map { index ->
+            createEntry(
+                lat = 52.0 + index * 0.00001,
+                lon = 13.0,
+                timestamp = "2024-01-01 12:00:%02d".format(index * 2)
+            )
+        }
 
-        val simplified = PathSmoother.smoothPath(cornerPath, 0.001)
+        val simplified = PathSmoother.simplifyTrack(straightTrack)
 
-        assertTrue("Simplified path should contain at least 3 points", simplified.size >= 3)
-        val hasPeak = simplified.any { it.lat == 52.2 && it.lon == 13.1 }
-        assertTrue("Simplified path should contain the peak point", hasPeak)
+        assertEquals(2, simplified.size)
+        assertEquals(straightTrack.first(), simplified.first())
+        assertEquals(straightTrack.last(), simplified.last())
     }
 
-    private fun createEntry(lat: Double, lon: Double): TourLogEntry {
+    @Test
+    fun `simplifyTrack preserves sensor event points`() {
+        val track = (0..10).map { index ->
+            createEntry(
+                lat = 52.0 + index * 0.00001,
+                lon = 13.0,
+                timestamp = "2024-01-01 12:00:%02d".format(index * 2),
+                leanAngleLeft = if (index == 5) 18.0 else 0.0
+            )
+        }
+        val eventPoint = track[5]
+
+        val simplified = PathSmoother.simplifyTrack(track)
+
+        assertTrue(simplified.contains(eventPoint))
+        assertEquals(track.first(), simplified.first())
+        assertEquals(track.last(), simplified.last())
+    }
+
+    @Test
+    fun `simplifyTrack preserves points after long time gaps`() {
+        val track = (0..10).map { index ->
+            val seconds = if (index >= 5) 30 + (index - 5) * 2 else index * 2
+            createEntry(
+                lat = 52.0 + index * 0.00001,
+                lon = 13.0,
+                timestamp = "2024-01-01 12:00:%02d".format(seconds)
+            )
+        }
+        val gapPoint = track[5]
+
+        val simplified = PathSmoother.simplifyTrack(track)
+
+        assertTrue(simplified.contains(gapPoint))
+    }
+
+    private fun createEntry(
+        lat: Double,
+        lon: Double,
+        timestamp: String = "2024-01-01 12:00:00",
+        leanAngleLeft: Double = 0.0
+    ): TourLogEntry {
         return TourLogEntry(
-            timestamp = "2024-01-01 12:00:00",
-            leanAngleLeft = 0.0,
+            timestamp = timestamp,
+            leanAngleLeft = leanAngleLeft,
             leanAngleRight = 0.0,
             acceleration = 0.0,
             braking = 0.0,

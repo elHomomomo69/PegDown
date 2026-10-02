@@ -497,7 +497,7 @@ class SensorProcessor(
         when (event.sensor.type) {
 
             Sensor.TYPE_GAME_ROTATION_VECTOR -> {
-                handleRotationVector(event)
+                handleRotationVector(event.values)
             }
 
             Sensor.TYPE_LINEAR_ACCELERATION -> {
@@ -510,14 +510,10 @@ class SensorProcessor(
     // ROTATION VECTOR
     // ========================================================================
 
-    private fun handleRotationVector(
-        event: SensorEvent
-    ) {
+    internal fun handleRotationVector(values: FloatArray) {
 
         val quaternion =
-            quaternionFromRotationVector(
-                event.values
-            ) ?: return
+            quaternionFromRotationVector(values) ?: return
 
         currentQuaternion = quaternion
 

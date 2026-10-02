@@ -3,7 +3,11 @@ package com.dpm.pegdown.data
 import com.dpm.pegdown.model.TourLogEntry
 import android.content.Context
 import io.mockk.mockk
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import java.io.ByteArrayInputStream
+import java.nio.charset.StandardCharsets
+import javax.xml.parsers.DocumentBuilderFactory
 import org.junit.Test
 
 class GpxExportTest {
@@ -46,6 +50,24 @@ class GpxExportTest {
         // Check if the description (lean/accel) is present in <cmt>
         assertTrue(gpx.contains("<cmt>Lean: L 25.5 R 0.0 | Accel: 0.15g | Brake: -0.10g | Speed: 65.0 kmh</cmt>"))
         // <desc> was removed for redundancy
+    }
+
+    @Test
+    fun `generateGpxString escapes special characters in tour name`() {
+        val tourName = "Ride & <one> \"great\""
+        val xml = tourExporter.generateGpxString(tourName, listOf(createEntry(52.0, 13.0)))
+        val documentFactory = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = true
+        }
+        val document = documentFactory
+            .newDocumentBuilder()
+            .parse(ByteArrayInputStream(xml.toByteArray(StandardCharsets.UTF_8)))
+
+        val trackName = document
+            .getElementsByTagNameNS("http://www.topografix.com/GPX/1/1", "name")
+            .item(0)
+            .textContent
+        assertEquals(tourName, trackName)
     }
 
     private fun createEntry(lat: Double, lon: Double): TourLogEntry {
