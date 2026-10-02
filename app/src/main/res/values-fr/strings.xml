@@ -2,6 +2,9 @@
     <string name="tour_max_format">Tour Max — G: %1$.1f° | D: %2$.1f° | Acc: +%3$.2fg | Frein: %4$.2fg</string>
     <string name="calibrated_format">Calibré (%.1f°)</string>
     <string name="not_calibrated">Non calibré</string>
+    <string name="status_sensor_not_ready">Capteur non prêt</string>
+    <string name="status_calibrating">Calibrage en cours…</string>
+    <string name="status_calibrated">✓ Calibré</string>
     <string name="acc_label">Acc</string>
     <string name="acc_format">Acc\n+%.2fg</string>
     <string name="brake_label">Frein</string>

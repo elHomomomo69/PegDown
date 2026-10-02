@@ -1026,7 +1026,7 @@ class MainActivity : AppCompatActivity(),
         if (!service.hasSensorData()) {
 
             tvStatus.text =
-                "Sensor noch nicht bereit"
+                getString(R.string.status_sensor_not_ready)
 
             tvStatus.setTextColor(
                 "#FF5252".toColorInt()
@@ -1036,7 +1036,7 @@ class MainActivity : AppCompatActivity(),
         }
 
         tvStatus.text =
-            "Kalibrierung läuft ..."
+            getString(R.string.status_calibrating)
 
         tvStatus.setTextColor(
             "#FFB300".toColorInt()
@@ -1059,7 +1059,7 @@ class MainActivity : AppCompatActivity(),
             service.isCalibrationInProgress() -> {
 
                 tvStatus.text =
-                    "Kalibrierung läuft ..."
+                    getString(R.string.status_calibrating)
 
                 tvStatus.setTextColor(
                     "#FFB300".toColorInt()
@@ -1069,7 +1069,7 @@ class MainActivity : AppCompatActivity(),
             service.isCalibrated() -> {
 
                 tvStatus.text =
-                    "✓ Kalibriert"
+                    getString(R.string.status_calibrated)
 
                 tvStatus.setTextColor(
                     "#00E676".toColorInt()

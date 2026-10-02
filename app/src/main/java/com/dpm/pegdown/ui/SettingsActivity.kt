@@ -104,8 +104,8 @@ class SettingsActivity : Activity() {
         container.addView(tvSmoothLabel)
         container.addView(createDesc(getString(R.string.desc_smoothing)))
         container.addView(SeekBar(this).apply {
-            max = 50 // 0.01 to 0.50
-            min = 1
+            max = 35 // 0.01 to 0.50
+            min = 5
             progress = (settingsManager.smoothingFactor * 100).toInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
