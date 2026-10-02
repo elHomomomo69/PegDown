@@ -1274,6 +1274,31 @@ class SensorProcessor(
         recordEntry()
     }
 
+    /** Fügt bei jedem gültigen Standort-Update einen Punkt zur Tourspur hinzu. */
+    fun recordLocation(location: android.location.Location, speedKmH: Double) {
+        if (!isRecording || !location.hasAccuracy() || location.accuracy > 100f) return
+        if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
+
+        currentLatitude = location.latitude
+        currentLongitude = location.longitude
+        currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
+        currentSpeedKmH = speedKmH
+
+        val lean = (currentFusedAngle - calibrationOffset).coerceIn(-65.0, 65.0)
+        val entry = TourLogEntry(
+            timestamp = gpxDateFormat.format(Date(location.time.takeIf { it > 0L } ?: timeProvider())),
+            leanAngleLeft = if (lean < 0.0) abs(lean) else 0.0,
+            leanAngleRight = if (lean > 0.0) lean else 0.0,
+            acceleration = smoothedAccel,
+            braking = smoothedBrake,
+            lat = location.latitude,
+            lon = location.longitude,
+            altitude = currentAltitude,
+            speed = speedKmH
+        )
+        listener.onPeakRecorded(entry)
+    }
+
     private fun recordEntry() {
 
         val now =

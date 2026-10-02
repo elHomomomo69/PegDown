@@ -3,7 +3,6 @@ package com.dpm.pegdown.data
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -31,8 +30,14 @@ class TourExporter(private val context: Context) {
     }
 
     fun generateGpxString(fileName: String, recordedEntries: List<TourLogEntry>): String {
-        // Pfad-Glättung anwenden (Epsilon ca. 0.00001 für minimale Abweichung)
-        val smoothedEntries = PathSmoother.smoothPath(recordedEntries, 0.00001)
+        // Redundante GPS-Samples ausdünnen, aber Sensorereignisse, Endpunkte
+        // und Punkte an längeren Zeitlücken erhalten.
+        val trackEntries = PathSmoother.simplifyTrack(
+            recordedEntries.filter { entry ->
+                entry.lat in -90.0..90.0 && entry.lon in -180.0..180.0 &&
+                    (entry.lat != 0.0 || entry.lon != 0.0)
+            }
+        )
 
         val gpxHeader = """<?xml version="1.0" encoding="UTF-8" ?>
 <gpx version="1.1" creator="PegDownApp"
@@ -40,7 +45,7 @@ class TourExporter(private val context: Context) {
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
   <trk>
-    <name>${fileName.replace(".gpx", "")}</name>
+    <name>${escapeXml(fileName.removeSuffix(".gpx"))}</name>
     <trkseg>
 """
         val gpxFooter = """    </trkseg>
@@ -48,7 +53,7 @@ class TourExporter(private val context: Context) {
 </gpx>"""
 
         val gpxContent = StringBuilder(gpxHeader)
-        for (entry in smoothedEntries) {
+        for (entry in trackEntries) {
             if ((entry.lat == 0.0) && (entry.lon == 0.0)) continue
 
             val isoTime = entry.timestamp.replace(" ", "T") + "Z"
@@ -74,13 +79,20 @@ class TourExporter(private val context: Context) {
                 entry.lon,
                 entry.altitude,
                 isoTime,
-                desc,
+                escapeXml(desc),
             )
             gpxContent.append(entryXml)
         }
         gpxContent.append(gpxFooter)
         return gpxContent.toString()
     }
+
+    private fun escapeXml(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
 
     fun saveTourToCsv(fileName: String, recordedEntries: List<TourLogEntry>) {
         try {
@@ -106,38 +118,46 @@ class TourExporter(private val context: Context) {
     }
 
     private fun saveFile(fileName: String, mimeType: String, content: ByteArray) {
-        var fileUri: Uri? = null
+        val safeFileName = fileName
+            .replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001F]"), "_")
+            .trim()
+            .ifEmpty { "PegDown-tour" }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val savedUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val contentValues = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, safeFileName)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
             }
 
             val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-            if (uri != null) {
-                resolver.openOutputStream(uri)?.use { it.write(content) }
-                fileUri = uri
+                ?: throw IllegalStateException("Could not create download entry")
+            try {
+                val output = resolver.openOutputStream(uri)
+                    ?: throw IllegalStateException("Could not open download entry")
+                output.use { it.write(content) }
+                uri
+            } catch (error: Exception) {
+                resolver.delete(uri, null, null)
+                throw error
             }
         } else {
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
-            val file = File(downloadsDir, fileName)
+            if (!downloadsDir.exists() && !downloadsDir.mkdirs()) {
+                throw IllegalStateException("Could not create Downloads directory")
+            }
+            val file = File(downloadsDir, safeFileName)
             file.writeBytes(content)
-            fileUri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         }
 
         Toast.makeText(context, "Saved to Downloads!", Toast.LENGTH_LONG).show()
-
-        if (fileUri != null) {
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = mimeType
-                putExtra(Intent.EXTRA_STREAM, fileUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share tour via"))
+        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+            type = mimeType
+            putExtra(Intent.EXTRA_STREAM, savedUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        context.startActivity(Intent.createChooser(shareIntent, "Share tour via"))
     }
 }

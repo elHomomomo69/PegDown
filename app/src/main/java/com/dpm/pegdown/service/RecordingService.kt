@@ -110,12 +110,14 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
      * ohne den SensorProcessor jedes Mal neu zu initialisieren.
      */
     fun startTracking() {
-        if (isTracking) return
+        if (!isTracking) {
+            sensorProcessor.start()
+            isTracking = true
+        }
 
-        sensorProcessor.start()
+        // Auch bei bereits laufenden Sensoren erneut prüfen, ob eine
+        // inzwischen erteilte Standortberechtigung jetzt Updates erlaubt.
         locationTracker.start()
-
-        isTracking = true
     }
 
     /**
@@ -273,8 +275,9 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     ) {
         sensorProcessor.currentLatitude = location.latitude
         sensorProcessor.currentLongitude = location.longitude
-        sensorProcessor.currentAltitude = location.altitude
+        sensorProcessor.currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
         sensorProcessor.currentSpeedKmH = speedKmH
+        sensorProcessor.recordLocation(location, speedKmH)
 
         uiListener?.onLocationUpdate(
             location,

@@ -35,28 +35,44 @@ class LocationTracker(
     }
 
     fun start() {
+        // Aktualisiert bestehende Provider-Anfragen, falls sich Berechtigungen
+        // seit dem letzten Start geändert haben.
+        locationManager.removeUpdates(androidLocationListener)
+
+        val finePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val coarsePermission = androidx.core.content.ContextCompat.checkSelfPermission(
+            context,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+        if (!finePermission && !coarsePermission) return
+
         try {
-            if (androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.ACCESS_FINE_LOCATION,
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (
+                finePermission &&
+                locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)
             ) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    2000L, // Erhöht auf 2 Sekunden für Akku-Schonung
+                    2000L,
                     2f,
                     androidLocationListener,
                 )
-                
-                // Optional: Auch den Network Provider nutzen für schnellere erste Fixes
-                if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                    locationManager.requestLocationUpdates(
-                        LocationManager.NETWORK_PROVIDER,
-                        5000L, // Network Fixes seltener
-                        10f,
-                        androidLocationListener,
-                    )
-                }
+            }
+
+            // Mit genauer oder ungefährer Berechtigung kann der Netzwerk-Provider
+            // einen Standort liefern; bei nur ungefährer Berechtigung bleibt es
+            // bei diesem Provider.
+            if (locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
+                locationManager.requestLocationUpdates(
+                    LocationManager.NETWORK_PROVIDER,
+                    5000L,
+                    10f,
+                    androidLocationListener,
+                )
             }
         } catch (e: SecurityException) {
             e.printStackTrace()
