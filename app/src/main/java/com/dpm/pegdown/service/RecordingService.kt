@@ -204,13 +204,11 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     // -------------------------------------------------------------------------
 
     fun resetTour() {
-        /*
-         * Eine laufende Aufnahme nicht heimlich löschen.
-         */
-        if (isRecording) return
-
         sensorProcessor.resetTour()
         recordedEntries.clear()
+        if (isRecording) {
+            sensorProcessor.recordCurrentState()
+        }
     }
 
     // -------------------------------------------------------------------------
