@@ -21,34 +21,45 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 class SensorProcessor(
-    context: Context,
+    private val context: Context,
     private val listener: SensorUpdateListener,
 ) : SensorEventListener {
 
     private val sensorManager =
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
 
-    /**
-     * Game Rotation Vector:
-     *
-     * - verwendet Gyro + Accelerometer-Sensorfusion
-     * - benötigt keinen Magnetkompass
-     * - wesentlich besser geeignet als eigener Gyro-Integrator
-     */
     private val rotationSensor =
-        sensorManager.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
+        sensorManager.getDefaultSensor(
+            Sensor.TYPE_GAME_ROTATION_VECTOR
+        )
 
-    /**
-     * Wird weiterhin ausschließlich für Beschleunigung/Bremsung benutzt.
-     */
     private val linearAccelSensor =
-        sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        sensorManager.getDefaultSensor(
+            Sensor.TYPE_LINEAR_ACCELERATION
+        )
 
     private val handler =
         Handler(Looper.getMainLooper())
 
-    private var tempResetRunnable: Runnable? = null
-    private var accelResetRunnable: Runnable? = null
+    // ========================================================================
+    // PEAK WINDOW
+    // ========================================================================
+
+    /**
+     * Gemeinsames Zeitfenster für Lean-, Beschleunigungs- und Bremspeaks.
+     *
+     * Wichtig:
+     *
+     * Es gibt bewusst nur EINEN Timer.
+     *
+     * Dadurch kann ein einzelnes Ereignis nicht durch getrennte Lean- und
+     * Beschleunigungs-Timer mehrfach aufgezeichnet werden.
+     */
+    private var peakResetRunnable: Runnable? = null
+
+    // ========================================================================
+    // GPX / TIME
+    // ========================================================================
 
     private val gpxDateFormat =
         SimpleDateFormat(
@@ -62,83 +73,109 @@ class SensorProcessor(
     // SETTINGS
     // ========================================================================
 
-    /**
-     * Glättung der angezeigten Schräglage.
-     *
-     * 0.05 = sehr ruhig
-     * 0.10 = guter Startwert
-     * 0.20 = schneller
-     * 0.50 = sehr direkt
-     */
     var smoothingAlpha: Double = 0.10
 
     var resetDurationMillis: Long = 7000L
 
-    // ========================================================================
-    // LEAN ANGLE
-    // ========================================================================
+    /**
+     * Anzahl der Samples während der Kalibrierung.
+     */
+    private val calibrationSampleCount = 30
 
     /**
-     * Aktueller Rohwinkel relativ zur Kalibrierung.
+     * Anzahl der Samples, die nach dem Start ignoriert werden.
      */
+    private val startupSamples = 15
+
+    // ========================================================================
+    // LEAN
+    // ========================================================================
+
     private var rawLeanAngle = 0.0
 
-    /**
-     * Geglätteter Winkel für die Anzeige.
-     */
     private var currentFusedAngle = 0.0
 
+    private var currentQuaternion: Quaternion? = null
+
     /**
-     * Beim Kalibrieren gespeicherte Quaternion.
+     * Gemittelte Orientierung während der Kalibrierung.
      */
     private var calibrationQuaternion: Quaternion? = null
 
     /**
-     * Letzte gültige Rotation.
+     * Relative Rotation:
+     *
+     * calibration^-1 * current
      */
-    private var currentQuaternion: Quaternion? = null
+    private var relativeQuaternion: Quaternion? = null
 
-    /**
-     * Anzahl Sensorwerte nach Start.
-     */
     private var sensorStartupCounter = 0
 
-    private val startupSamples = 15
-
     /**
-     * Optionaler kleiner Offset für die Nulllage.
+     * Legacy-Wert.
+     *
+     * Die eigentliche Kalibrierung erfolgt über calibrationQuaternion.
      */
     var calibrationOffset = 0.0
         private set
 
-    private var straightDriveStartTime = 0L
-    private val autoZeroMinSpeed = 40.0
-    private val autoZeroThresholdAngle = 1.0
-    private val autoZeroDurationMs = 15000L
+    /**
+     * true, sobald eine gültige Kalibrierungsreferenz vorhanden ist.
+     */
+    val isCalibrated: Boolean
+        get() = calibrationQuaternion != null
 
-    internal fun checkAutoZero(currentAngle: Double) {
-        if (currentSpeedKmH >= autoZeroMinSpeed && abs(currentAngle) < autoZeroThresholdAngle) {
-            val now = timeProvider()
-            if (straightDriveStartTime == 0L) {
-                straightDriveStartTime = now
-            } else if (now - straightDriveStartTime > autoZeroDurationMs) {
-                calibrationOffset += currentAngle * 0.005
-            }
-        } else {
-            straightDriveStartTime = 0L
-        }
-    }
+    /**
+     * true, sobald der Rotation-Vector-Sensor mindestens einen Wert geliefert hat.
+     */
+    val hasSensorData: Boolean
+        get() = currentQuaternion != null
+
+    /**
+     * true, solange gerade Kalibrierungs-Samples gesammelt werden.
+     */
+    val isCalibrationInProgress: Boolean
+        get() = calibrationInProgress
+
+    // ========================================================================
+    // CALIBRATION STATE
+    // ========================================================================
+
+    private var calibrationInProgress = false
+
+    private val calibrationQuaternions =
+        mutableListOf<Quaternion>()
+
+    private var calibrationAccelX = 0.0
+    private var calibrationAccelY = 0.0
+    private var calibrationAccelZ = 0.0
+    private var calibrationAccelSamples = 0
+
+    /**
+     * 0.0 ... 1.0
+     */
+    var calibrationProgress: Double = 0.0
+        private set
 
     // ========================================================================
     // LEAN PEAKS
     // ========================================================================
 
     var maxTourLeft = 0.0
+        private set
+
     var maxTourRight = 0.0
+        private set
 
     private var maxTempLeft = 0.0
     private var maxTempRight = 0.0
 
+    /**
+     * Größter Lean-Peak im aktuellen gemeinsamen Peak-Fenster.
+     *
+     * Negativ = links
+     * Positiv = rechts
+     */
     private var lastPeakLeanAngle = 0.0
 
     // ========================================================================
@@ -146,10 +183,16 @@ class SensorProcessor(
     // ========================================================================
 
     var maxAcceleration = 0.0
+        private set
+
     var maxBraking = 0.0
+        private set
 
     var tourMaxAccel = 0.0
+        private set
+
     var tourMaxBrake = 0.0
+        private set
 
     private var smoothedAccel = 0.0
     private var smoothedBrake = 0.0
@@ -167,6 +210,9 @@ class SensorProcessor(
     var currentAltitude = 0.0
     var currentSpeedKmH = 0.0
 
+    /**
+     * GPS-Daten des letzten tatsächlich gespeicherten Eintrags.
+     */
     private var lastValidLat = 0.0
     private var lastValidLon = 0.0
     private var lastValidTime = 0L
@@ -188,13 +234,22 @@ class SensorProcessor(
         sensorStartupCounter = 0
 
         currentQuaternion = null
+        relativeQuaternion = null
+
+        calibrationInProgress = false
+        calibrationProgress = 0.0
+        calibrationQuaternions.clear()
+
         rawLeanAngle = 0.0
         currentFusedAngle = 0.0
 
         /*
-         * Wir benötigen für die Schräglage ausschließlich den
-         * Game Rotation Vector.
+         * Die bestehende Kalibrierung bleibt erhalten.
+         *
+         * Das ist wichtig, wenn die Activity bzw. der Service kurz neu
+         * gestartet wird.
          */
+
         rotationSensor?.let {
             sensorManager.registerListener(
                 this,
@@ -203,9 +258,6 @@ class SensorProcessor(
             )
         }
 
-        /*
-         * Beschleunigung / Bremsung weiterhin separat.
-         */
         linearAccelSensor?.let {
             sensorManager.registerListener(
                 this,
@@ -216,7 +268,14 @@ class SensorProcessor(
     }
 
     fun stop() {
+
         sensorManager.unregisterListener(this)
+
+        peakResetRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+
+        peakResetRunnable = null
     }
 
     // ========================================================================
@@ -224,38 +283,150 @@ class SensorProcessor(
     // ========================================================================
 
     /**
-     * Setzt die aktuelle Position auf 0°.
+     * Startet eine Mehrfach-Sample-Kalibrierung.
      *
-     * Wichtig:
-     *
-     * Es wird die komplette aktuelle Orientierung gespeichert.
-     *
-     * Dadurch ist es egal, ob das Handy z.B. 5° nach vorne oder
-     * 3° seitlich schief in der Halterung sitzt.
+     * Der aktuelle Wert wird NICHT sofort als Nullpunkt übernommen.
      */
     fun calibrate() {
 
-        val current = currentQuaternion
-
-        if (current != null) {
-
-            calibrationQuaternion = current.copy()
-
-            calibrationOffset = 0.0
-            straightDriveStartTime = 0L
-
-            rawLeanAngle = 0.0
-            currentFusedAngle = 0.0
-
-            /*
-             * Peaks sollen nicht durch die Kalibrierung verfälscht werden.
-             */
-            maxTempLeft = 0.0
-            maxTempRight = 0.0
-            lastPeakLeanAngle = 0.0
+        /*
+         * Ohne Rotation Vector können wir nicht sinnvoll kalibrieren.
+         */
+        if (currentQuaternion == null) {
+            return
         }
 
+        /*
+         * Falls bereits eine Kalibrierung läuft, nicht erneut starten.
+         */
+        if (calibrationInProgress) {
+            return
+        }
+
+        calibrationQuaternions.clear()
+
+        calibrationAccelX = 0.0
+        calibrationAccelY = 0.0
+        calibrationAccelZ = 0.0
+        calibrationAccelSamples = 0
+
+        calibrationProgress = 0.0
+        calibrationInProgress = true
+
+        /*
+         * Alte temporäre Peaks löschen.
+         */
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+        lastPeakLeanAngle = 0.0
+
+        maxAcceleration = 0.0
+        maxBraking = 0.0
+
+        cancelPeakTimer()
+
         notifyUpdates()
+    }
+
+    /**
+     * Wird automatisch aufgerufen, sobald genügend Samples gesammelt wurden.
+     */
+    private fun finishCalibration() {
+
+        if (calibrationQuaternions.isEmpty()) {
+
+            calibrationInProgress = false
+            calibrationProgress = 0.0
+
+            notifyUpdates()
+
+            return
+        }
+
+        /*
+         * Quaternionen mitteln.
+         *
+         * q und -q beschreiben dieselbe Rotation.
+         *
+         * Deshalb werden alle Quaternionen vor dem Mitteln auf dieselbe
+         * Hemisphäre ausgerichtet.
+         */
+        val reference =
+            calibrationQuaternions.first()
+
+        var sumW = 0.0
+        var sumX = 0.0
+        var sumY = 0.0
+        var sumZ = 0.0
+
+        for (sample in calibrationQuaternions) {
+
+            val aligned =
+                if (reference.dot(sample) < 0.0) {
+                    -sample
+                } else {
+                    sample
+                }
+
+            sumW += aligned.w
+            sumX += aligned.x
+            sumY += aligned.y
+            sumZ += aligned.z
+        }
+
+        val count =
+            calibrationQuaternions.size.toDouble()
+
+        val averaged =
+            Quaternion(
+                w = sumW / count,
+                x = sumX / count,
+                y = sumY / count,
+                z = sumZ / count
+            ).normalized()
+
+        calibrationQuaternion = averaged
+
+        /*
+         * Die Quaternion ist jetzt der Nullpunkt.
+         */
+        calibrationOffset = 0.0
+
+        rawLeanAngle = 0.0
+        currentFusedAngle = 0.0
+        relativeQuaternion = null
+
+        /*
+         * Temporäre Peaks der alten Orientierung löschen.
+         */
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+        lastPeakLeanAngle = 0.0
+
+        maxAcceleration = 0.0
+        maxBraking = 0.0
+
+        smoothedAccel = 0.0
+        smoothedBrake = 0.0
+
+        cancelPeakTimer()
+
+        calibrationInProgress = false
+        calibrationProgress = 1.0
+
+        calibrationQuaternions.clear()
+
+        notifyUpdates()
+
+        /*
+         * Fortschrittsanzeige nach kurzer Zeit zurücksetzen.
+         */
+        handler.postDelayed(
+            {
+                calibrationProgress = 0.0
+            },
+            500
+        )
     }
 
     // ========================================================================
@@ -264,27 +435,44 @@ class SensorProcessor(
 
     fun resetTour() {
 
+        /*
+         * Tour-Maxima.
+         */
         maxTourLeft = 0.0
         maxTourRight = 0.0
-
-        maxTempLeft = 0.0
-        maxTempRight = 0.0
-
-        maxAcceleration = 0.0
-        maxBraking = 0.0
 
         tourMaxAccel = 0.0
         tourMaxBrake = 0.0
 
+        /*
+         * Temporäre Peaks.
+         */
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+
         lastPeakLeanAngle = 0.0
 
-        accelResetRunnable?.let {
-            handler.removeCallbacks(it)
-        }
+        maxAcceleration = 0.0
+        maxBraking = 0.0
 
-        tempResetRunnable?.let {
-            handler.removeCallbacks(it)
-        }
+        /*
+         * Glättungszustand zurücksetzen.
+         */
+        smoothedAccel = 0.0
+        smoothedBrake = 0.0
+
+        /*
+         * Gemeinsames Peak-Fenster abbrechen.
+         */
+        cancelPeakTimer()
+
+        /*
+         * GPS-Historie des alten Tourabschnitts nicht in die neue Tour
+         * übernehmen.
+         */
+        lastValidLat = currentLatitude
+        lastValidLon = currentLongitude
+        lastValidTime = 0L
 
         notifyUpdates()
     }
@@ -300,7 +488,9 @@ class SensorProcessor(
         // Nicht benötigt.
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
+    override fun onSensorChanged(
+        event: SensorEvent?
+    ) {
 
         if (event == null) return
 
@@ -320,106 +510,139 @@ class SensorProcessor(
     // ROTATION VECTOR
     // ========================================================================
 
-    private fun handleRotationVector(event: SensorEvent) {
+    private fun handleRotationVector(
+        event: SensorEvent
+    ) {
 
         val quaternion =
-            quaternionFromRotationVector(event.values)
-                ?: return
+            quaternionFromRotationVector(
+                event.values
+            ) ?: return
 
         currentQuaternion = quaternion
 
         /*
-         * Kurze Startphase.
+         * Startup.
          *
-         * Dadurch vermeiden wir, dass direkt beim Start ein einzelner
-         * Sensor-Ausreißer als Peak gespeichert wird.
+         * Die ersten Samples werden nicht verarbeitet, damit sich der
+         * Sensor nach dem Start stabilisieren kann.
          */
         if (sensorStartupCounter < startupSamples) {
 
             sensorStartupCounter++
 
-            /*
-             * Noch keine automatische Kalibrierung hier!
-             *
-             * Der Benutzer soll mit dem Kalibrierknopf den tatsächlichen
-             * Nullpunkt bestimmen.
-             */
+            return
+        }
+
+        // --------------------------------------------------------------------
+        // KALIBRIERUNG
+        // --------------------------------------------------------------------
+
+        if (calibrationInProgress) {
+
+            calibrationQuaternions.add(
+                quaternion
+            )
+
+            calibrationProgress =
+                (
+                        calibrationQuaternions.size.toDouble() /
+                                calibrationSampleCount.toDouble()
+                        ).coerceIn(
+                        0.0,
+                        1.0
+                    )
+
+            if (
+                calibrationQuaternions.size >=
+                calibrationSampleCount
+            ) {
+                finishCalibration()
+            }
+
             return
         }
 
         /*
-         * Falls noch nie kalibriert wurde, setzen wir beim ersten gültigen
-         * Zustand eine Referenz.
+         * Noch nicht kalibriert:
          *
-         * Der Benutzer kann danach jederzeit erneut kalibrieren.
+         * Es wird KEINE automatische Kalibrierung mehr durchgeführt.
+         *
+         * Dadurch bleibt isCalibrated() bis zur tatsächlichen Benutzer-
+         * Kalibrierung korrekt false.
          */
         if (calibrationQuaternion == null) {
-            calibrationQuaternion = quaternion.copy()
 
             rawLeanAngle = 0.0
             currentFusedAngle = 0.0
 
+            notifyUpdates()
+
             return
         }
 
-        val relativeQuaternion =
+        // --------------------------------------------------------------------
+        // RELATIVE ROTATION
+        // --------------------------------------------------------------------
+
+        val relative =
             calculateRelativeQuaternion(
                 calibrationQuaternion!!,
                 quaternion
             )
 
+        relativeQuaternion = relative
+
         /*
-         * WICHTIG:
+         * Schräglage = Z-Twist.
          *
-         * Unsere Schräglage ist die Rotation um die Z-Achse des Displays.
-         *
-         * Wir extrahieren deshalb ausschließlich den Z-Twist.
-         *
-         * Yaw und Pitch werden dadurch nicht einfach als Schräglage
-         * interpretiert.
+         * links  = negativ
+         * rechts = positiv
          */
         val calculatedLean =
-            extractZTwistAngle(relativeQuaternion)
+            extractZTwistAngle(relative)
 
         rawLeanAngle = calculatedLean
 
         /*
-         * Kleine Sensorbewegungen unterhalb 0,15° ignorieren.
+         * Kleine Sensorbewegungen entfernen.
          */
         val targetAngle =
-            if (abs(rawLeanAngle) < 0.15) {
+            if (abs(rawLeanAngle) < 0.20) {
                 0.0
             } else {
                 rawLeanAngle
             }
 
         /*
+         * Sicherheitsgrenze.
+         */
+        val limitedAngle =
+            targetAngle.coerceIn(
+                -65.0,
+                65.0
+            )
+
+        /*
          * Anzeige glätten.
          */
         val alpha =
-            smoothingAlpha.coerceIn(0.02, 0.50)
+            smoothingAlpha.coerceIn(
+                0.01,
+                0.50
+            )
 
         currentFusedAngle +=
-            alpha * (targetAngle - currentFusedAngle)
+            alpha *
+                    (limitedAngle - currentFusedAngle)
 
         processLeanAngle()
     }
 
     // ========================================================================
-    // QUATERNION AUS ROTATION VECTOR
+    // QUATERNION FROM ROTATION VECTOR
     // ========================================================================
 
-    /**
-     * Android liefert beim TYPE_GAME_ROTATION_VECTOR:
-     *
-     * x, y, z
-     *
-     * und bei manchen Geräten zusätzlich:
-     *
-     * w
-     *
-     * Falls w nicht enthalten ist, berechnen wir es.
-     */
     private fun quaternionFromRotationVector(
         values: FloatArray
     ): Quaternion? {
@@ -428,17 +651,27 @@ class SensorProcessor(
             return null
         }
 
-        val x = values[0].toDouble()
-        val y = values[1].toDouble()
-        val z = values[2].toDouble()
+        val x =
+            values[0].toDouble()
+
+        val y =
+            values[1].toDouble()
+
+        val z =
+            values[2].toDouble()
 
         val w =
             if (values.size >= 4) {
+
                 values[3].toDouble()
+
             } else {
 
                 val ww =
-                    1.0 - x * x - y * y - z * z
+                    1.0 -
+                            x * x -
+                            y * y -
+                            z * z
 
                 if (ww > 0.0) {
                     sqrt(ww)
@@ -447,76 +680,37 @@ class SensorProcessor(
                 }
             }
 
-        val q =
-            Quaternion(
-                w = w,
-                x = x,
-                y = y,
-                z = z
-            )
-
-        return q.normalized()
+        return Quaternion(
+            w = w,
+            x = x,
+            y = y,
+            z = z
+        ).normalized()
     }
 
     // ========================================================================
-    // RELATIVE ROTATION
+    // RELATIVE QUATERNION
     // ========================================================================
 
-    /**
-     * Berechnet:
-     *
-     *     calibration^-1 * current
-     *
-     * Das Ergebnis beschreibt also die Rotation relativ zum beim
-     * Kalibrieren gespeicherten Zustand.
-     */
     private fun calculateRelativeQuaternion(
         calibration: Quaternion,
         current: Quaternion
     ): Quaternion {
 
-        val inverse =
-            calibration.inverse()
-
         return (
-                inverse * current
+                calibration.inverse() *
+                        current
                 ).normalized()
     }
 
     // ========================================================================
-    // Z TWIST
+    // LEAN = Z TWIST
     // ========================================================================
 
-    /**
-     * Extrahiert ausschließlich die Rotation um Z.
-     *
-     * Das ist bei deiner Montage die gewünschte Schräglagenachse.
-     *
-     * Android:
-     *
-     *   X = rechts
-     *   Y = oben
-     *   Z = aus dem Display heraus
-     *
-     * Für die Anzeige:
-     *
-     *   links  = NEGATIV
-     *   rechts = POSITIV
-     *
-     * Deshalb drehen wir das mathematische Vorzeichen entsprechend.
-     */
     private fun extractZTwistAngle(
         q: Quaternion
     ): Double {
 
-        /*
-         * Twist um Z:
-         *
-         * angle = atan2(
-         *     2 * (w*z),
-         *     1 - 2*z²
-         * )
-         */
         val angle =
             atan2(
                 2.0 * q.w * q.z,
@@ -524,14 +718,225 @@ class SensorProcessor(
             )
 
         /*
-         * Für die von dir beschriebene Montage:
+         * Gewünschte Richtung:
          *
-         * links  = negativ
-         * rechts = positiv
-         *
-         * Das Vorzeichen wird deshalb invertiert.
+         * links  = -
+         * rechts = +
          */
         return -Math.toDegrees(angle)
+    }
+
+    // ========================================================================
+    // LINEAR ACCELERATION / BRAKING
+    // ========================================================================
+
+    private fun handleLinearAcceleration(
+        event: SensorEvent
+    ) {
+
+        val x =
+            event.values[0].toDouble()
+
+        val y =
+            event.values[1].toDouble()
+
+        val z =
+            event.values[2].toDouble()
+
+        /*
+         * Während der Kalibrierung Werte sammeln.
+         *
+         * Aktuell werden sie nur erfasst. Die Quaternion-Kalibrierung
+         * verwendet sie nicht als mathematischen Teil des Nullpunkts.
+         */
+        if (calibrationInProgress) {
+
+            calibrationAccelX += x
+            calibrationAccelY += y
+            calibrationAccelZ += z
+
+            calibrationAccelSamples++
+
+            return
+        }
+
+        val calibration =
+            calibrationQuaternion
+
+        val forwardG: Double
+
+        if (calibration != null) {
+
+            val acceleration =
+                Vector3(
+                    x,
+                    y,
+                    z
+                )
+
+            val current =
+                currentQuaternion
+
+            if (current != null) {
+
+                val relative =
+                    calculateRelativeQuaternion(
+                        calibration,
+                        current
+                    )
+
+                val accelerationInCalibrationFrame =
+                    rotateVector(
+                        relative,
+                        acceleration
+                    )
+
+                /*
+                 * Montage:
+                 *
+                 * Rückseite des Telefons zeigt nach vorne.
+                 * Android +Z zeigt aus dem Display heraus.
+                 *
+                 * Daher:
+                 *
+                 * -Z = Fahrtrichtung.
+                 */
+                forwardG =
+                    -accelerationInCalibrationFrame.z /
+                            9.81
+
+            } else {
+
+                forwardG =
+                    -z / 9.81
+            }
+
+        } else {
+
+            /*
+             * Vor der ersten Benutzerkalibrierung wird keine
+             * Beschleunigung verarbeitet.
+             *
+             * Dadurch entstehen keine falschen Recording-Peaks.
+             */
+            return
+        }
+
+        processAcceleration(
+            forwardG
+        )
+    }
+
+    // ========================================================================
+    // ACCELERATION PROCESSING
+    // ========================================================================
+
+    private fun processAcceleration(
+        inputG: Double
+    ) {
+
+        var currentForwardG =
+            inputG
+
+        /*
+         * Kleine Bewegungen ignorieren.
+         */
+        if (abs(currentForwardG) < 0.05) {
+            currentForwardG = 0.0
+        }
+
+        /*
+         * Sensor-Ausreißer begrenzen.
+         */
+        currentForwardG =
+            currentForwardG.coerceIn(
+                -2.0,
+                2.0
+            )
+
+        /*
+         * Beschleunigung.
+         */
+        if (currentForwardG >= 0.0) {
+
+            smoothedAccel +=
+                accelSmoothingAlpha *
+                        (
+                                currentForwardG -
+                                        smoothedAccel
+                                )
+
+            smoothedBrake = 0.0
+
+        } else {
+
+            smoothedBrake +=
+                accelSmoothingAlpha *
+                        (
+                                currentForwardG -
+                                        smoothedBrake
+                                )
+
+            smoothedAccel = 0.0
+        }
+
+        var newPeak = false
+
+        /*
+         * Beschleunigungspeak.
+         */
+        if (
+            smoothedAccel >
+            maxAcceleration
+        ) {
+
+            maxAcceleration =
+                smoothedAccel
+
+            newPeak = true
+        }
+
+        /*
+         * Bremspeak.
+         */
+        if (
+            smoothedBrake <
+            maxBraking
+        ) {
+
+            maxBraking =
+                smoothedBrake
+
+            newPeak = true
+        }
+
+        /*
+         * Tour-Maximum.
+         */
+        if (
+            maxAcceleration >
+            tourMaxAccel
+        ) {
+            tourMaxAccel =
+                maxAcceleration
+        }
+
+        if (
+            maxBraking <
+            tourMaxBrake
+        ) {
+            tourMaxBrake =
+                maxBraking
+        }
+
+        /*
+         * Jeder neue Peak verlängert das gemeinsame Fenster.
+         */
+        if (newPeak) {
+            schedulePeakReset()
+        }
+
+        notifyUpdates()
     }
 
     // ========================================================================
@@ -541,67 +946,123 @@ class SensorProcessor(
     private fun processLeanAngle() {
 
         val calculatedAngle =
-            currentFusedAngle - calibrationOffset
+            currentFusedAngle -
+                    calibrationOffset
 
         val finalAngle =
-            round(calculatedAngle / 0.1) * 0.1
-
-        checkAutoZero(calculatedAngle)
+            round(
+                calculatedAngle / 0.1
+            ) * 0.1
 
         /*
-         * Tour-Maxima
+         * Tour-Maxima.
          */
         if (finalAngle < maxTourLeft) {
-            maxTourLeft = finalAngle
+
+            maxTourLeft =
+                finalAngle
         }
 
         if (finalAngle > maxTourRight) {
-            maxTourRight = finalAngle
+
+            maxTourRight =
+                finalAngle
         }
 
         /*
-         * Temporäre Peaks
+         * Temporäre Peaks.
          */
-        var newTempPeak = false
+        var newPeak = false
 
         if (finalAngle < maxTempLeft) {
 
-            maxTempLeft = finalAngle
-            newTempPeak = true
+            maxTempLeft =
+                finalAngle
+
+            newPeak = true
         }
 
         if (finalAngle > maxTempRight) {
 
-            maxTempRight = finalAngle
-            newTempPeak = true
+            maxTempRight =
+                finalAngle
+
+            newPeak = true
         }
 
-        if (newTempPeak) {
+        if (newPeak) {
 
             lastPeakLeanAngle =
-                if (abs(maxTempLeft) > abs(maxTempRight)) {
+                if (
+                    abs(maxTempLeft) >
+                    abs(maxTempRight)
+                ) {
                     maxTempLeft
                 } else {
                     maxTempRight
                 }
 
-            tempResetRunnable?.let {
-                handler.removeCallbacks(it)
-            }
+            /*
+             * Gemeinsames Peak-Fenster.
+             */
+            schedulePeakReset()
+        }
 
-            tempResetRunnable = Runnable {
+        notifyUpdates()
+    }
 
-                if (
-                    isRecording &&
-                    (
-                            abs(lastPeakLeanAngle) > 1.0 ||
-                                    maxAcceleration > 0.1 ||
-                                    abs(maxBraking) > 0.1
-                            )
-                ) {
-                    recordEntry()
+    // ========================================================================
+    // COMMON PEAK WINDOW
+    // ========================================================================
+
+    /**
+     * Startet bzw. verlängert das gemeinsame Peak-Fenster.
+     *
+     * Während dieses Fensters werden Lean-, Beschleunigungs- und
+     * Bremswerte gemeinsam gesammelt.
+     *
+     * Kommt ein neuer Peak hinzu, beginnt das Zeitfenster erneut.
+     */
+    private fun schedulePeakReset() {
+
+        peakResetRunnable?.let {
+            handler.removeCallbacks(it)
+        }
+
+        val delay =
+            resetDurationMillis.coerceAtLeast(
+                1000L
+            )
+
+        peakResetRunnable =
+            Runnable {
+
+                /*
+                 * Nur speichern, wenn tatsächlich aufgezeichnet wird.
+                 */
+                if (isRecording) {
+
+                    val hasLeanPeak =
+                        abs(lastPeakLeanAngle) > 1.0
+
+                    val hasAccelPeak =
+                        maxAcceleration > 0.1
+
+                    val hasBrakePeak =
+                        abs(maxBraking) > 0.1
+
+                    if (
+                        hasLeanPeak ||
+                        hasAccelPeak ||
+                        hasBrakePeak
+                    ) {
+                        recordEntry()
+                    }
                 }
 
+                /*
+                 * Temporäre Werte des Fensters zurücksetzen.
+                 */
                 maxTempLeft = 0.0
                 maxTempRight = 0.0
 
@@ -610,141 +1071,58 @@ class SensorProcessor(
                 maxAcceleration = 0.0
                 maxBraking = 0.0
 
+                peakResetRunnable = null
+
                 notifyUpdates()
             }
 
-            handler.postDelayed(
-                tempResetRunnable!!,
-                resetDurationMillis
-            )
+        handler.postDelayed(
+            peakResetRunnable!!,
+            delay
+        )
+    }
+
+    private fun cancelPeakTimer() {
+
+        peakResetRunnable?.let {
+            handler.removeCallbacks(it)
         }
 
-        notifyUpdates()
+        peakResetRunnable = null
     }
 
     // ========================================================================
-    // LINEAR ACCELERATION
+    // VECTOR ROTATION
     // ========================================================================
 
-    private fun handleLinearAcceleration(
-        event: SensorEvent
-    ) {
+    /**
+     * Rotiert einen Vektor mit einem Quaternion.
+     *
+     * v' = q * v * q^-1
+     */
+    private fun rotateVector(
+        q: Quaternion,
+        vector: Vector3
+    ): Vector3 {
 
-        val y = event.values[1]
-
-        /*
-         * Die Vorwärtsachse hängt davon ab, wie dein Handy im Landscape
-         * montiert ist.
-         *
-         * Bei deiner beschriebenen Montage:
-         *
-         * Rückseite zeigt nach vorne.
-         *
-         * Die bisherige App verwendet:
-         *
-         * Landscape -> Y
-         *
-         * Das behalten wir zunächst für Beschleunigung/Bremsung bei.
-         */
-        val rawAccel = y
-
-        var currentForwardG =
-            rawAccel / 9.81
-
-        if (abs(currentForwardG) < 0.05) {
-            currentForwardG = 0.0
-        }
-
-        if (currentForwardG >= 0.0) {
-
-            smoothedAccel +=
-                accelSmoothingAlpha *
-                        (currentForwardG - smoothedAccel)
-
-            smoothedBrake = 0.0
-
-        } else {
-
-            smoothedBrake +=
-                accelSmoothingAlpha *
-                        (currentForwardG - smoothedBrake)
-
-            smoothedAccel = 0.0
-        }
-
-        var newAccelPeak = false
-
-        /*
-         * Beschleunigung
-         */
-        if (
-            smoothedAccel > maxAcceleration &&
-            smoothedAccel < 2.0
-        ) {
-            maxAcceleration = smoothedAccel
-            newAccelPeak = true
-        }
-
-        /*
-         * Bremsung
-         */
-        if (
-            smoothedBrake < maxBraking &&
-            smoothedBrake > -2.0
-        ) {
-            maxBraking = smoothedBrake
-            newAccelPeak = true
-        }
-
-        /*
-         * Tour-Maximum
-         */
-        if (maxAcceleration > tourMaxAccel) {
-            tourMaxAccel = maxAcceleration
-        }
-
-        if (maxBraking < tourMaxBrake) {
-            tourMaxBrake = maxBraking
-        }
-
-        if (newAccelPeak) {
-
-            val peakAccelToSave =
-                maxAcceleration
-
-            val peakBrakeToSave =
-                maxBraking
-
-            accelResetRunnable?.let {
-                handler.removeCallbacks(it)
-            }
-
-            accelResetRunnable = Runnable {
-
-                if (
-                    isRecording &&
-                    (
-                            abs(lastPeakLeanAngle) > 1.0 ||
-                                    peakAccelToSave > 0.1 ||
-                                    abs(peakBrakeToSave) > 0.1
-                            )
-                ) {
-                    recordEntry()
-                }
-
-                maxAcceleration = 0.0
-                maxBraking = 0.0
-
-                notifyUpdates()
-            }
-
-            handler.postDelayed(
-                accelResetRunnable!!,
-                resetDurationMillis
+        val vectorQuaternion =
+            Quaternion(
+                w = 0.0,
+                x = vector.x,
+                y = vector.y,
+                z = vector.z
             )
-        }
 
-        notifyUpdates()
+        val rotated =
+            q *
+                    vectorQuaternion *
+                    q.inverse()
+
+        return Vector3(
+            rotated.x,
+            rotated.y,
+            rotated.z
+        )
     }
 
     // ========================================================================
@@ -754,10 +1132,13 @@ class SensorProcessor(
     private fun notifyUpdates() {
 
         val calculatedAngle =
-            currentFusedAngle - calibrationOffset
+            currentFusedAngle -
+                    calibrationOffset
 
         val finalAngle =
-            round(calculatedAngle / 0.1) * 0.1
+            round(
+                calculatedAngle / 0.1
+            ) * 0.1
 
         listener.onLeanAngleUpdate(
             finalAngle,
@@ -779,11 +1160,118 @@ class SensorProcessor(
     // RECORDING
     // ========================================================================
 
-    fun recordCurrentState() {
+    fun startRecording() {
+
+        /*
+         * Alte Peak-Timer nicht in eine neue Aufnahme übernehmen.
+         */
+        cancelPeakTimer()
+
+        isRecording = true
+
+        /*
+         * Temporäre Peak-Werte beginnen bei null.
+         */
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+        lastPeakLeanAngle = 0.0
+
+        maxAcceleration = 0.0
+        maxBraking = 0.0
+
+        smoothedAccel = 0.0
+        smoothedBrake = 0.0
+
+        /*
+         * GPS-Historie beginnt für die neue Aufnahme neu.
+         */
+        lastValidLat = currentLatitude
+        lastValidLon = currentLongitude
+        lastValidTime = 0L
+
+        notifyUpdates()
+    }
+
+    fun stopRecording() {
+
+        /*
+         * Aktives Peak-Fenster abbrechen.
+         */
+        cancelPeakTimer()
+
+        isRecording = false
+
+        /*
+         * Temporäre Peaks löschen.
+         */
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+        lastPeakLeanAngle = 0.0
+
+        maxAcceleration = 0.0
+        maxBraking = 0.0
+
+        notifyUpdates()
+    }
+
+    /**
+     * Beendet eine Aufnahme.
+     *
+     * Falls noch ein Peak-Fenster aktiv ist, wird der aktuelle Peak
+     * unmittelbar gespeichert.
+     */
+    fun finishRecording() {
 
         if (isRecording) {
-            recordEntry()
+
+            /*
+             * Timer stoppen, damit danach kein zweiter identischer Eintrag
+             * entsteht.
+             */
+            cancelPeakTimer()
+
+            val hasLeanPeak =
+                abs(lastPeakLeanAngle) > 1.0
+
+            val hasAccelPeak =
+                maxAcceleration > 0.1
+
+            val hasBrakePeak =
+                abs(maxBraking) > 0.1
+
+            if (
+                hasLeanPeak ||
+                hasAccelPeak ||
+                hasBrakePeak
+            ) {
+                recordEntry()
+            }
         }
+
+        isRecording = false
+
+        maxTempLeft = 0.0
+        maxTempRight = 0.0
+        lastPeakLeanAngle = 0.0
+
+        maxAcceleration = 0.0
+        maxBraking = 0.0
+
+        notifyUpdates()
+    }
+
+    /**
+     * Kompatibilitätsmethode.
+     *
+     * Wird nicht mehr für die normale Peak-Logik benötigt.
+     */
+    fun recordCurrentState() {
+
+        if (!isRecording) {
+            return
+        }
+
+        recordEntry()
     }
 
     private fun recordEntry() {
@@ -791,6 +1279,12 @@ class SensorProcessor(
         val now =
             timeProvider()
 
+        /*
+         * GPS-basierte Plausibilitätsprüfung.
+         *
+         * Die Prüfung wird nur durchgeführt, wenn bereits eine vorherige
+         * gültige Position vorhanden ist.
+         */
         if (lastValidTime != 0L) {
 
             val dist =
@@ -802,9 +1296,10 @@ class SensorProcessor(
                 )
 
             val timeSec =
-                (now - lastValidTime) / 1000.0
+                (now - lastValidTime) /
+                        1000.0
 
-            if (timeSec > 0) {
+            if (timeSec > 0.0) {
 
                 val speedCheck =
                     (dist / timeSec) * 3.6
@@ -815,19 +1310,30 @@ class SensorProcessor(
             }
         }
 
-        lastValidLat = currentLatitude
-        lastValidLon = currentLongitude
-        lastValidTime = now
+        /*
+         * Aktuelle GPS-Position als letzten gültigen Punkt merken.
+         */
+        lastValidLat =
+            currentLatitude
 
+        lastValidLon =
+            currentLongitude
+
+        lastValidTime =
+            now
+
+        /*
+         * Lean-Richtung.
+         */
         val leftVal =
-            if (lastPeakLeanAngle < 0) {
+            if (lastPeakLeanAngle < 0.0) {
                 abs(lastPeakLeanAngle)
             } else {
                 0.0
             }
 
         val rightVal =
-            if (lastPeakLeanAngle > 0) {
+            if (lastPeakLeanAngle > 0.0) {
                 abs(lastPeakLeanAngle)
             } else {
                 0.0
@@ -839,17 +1345,27 @@ class SensorProcessor(
                     gpxDateFormat.format(
                         Date(now)
                     ),
-                leanAngleLeft = leftVal,
-                leanAngleRight = rightVal,
-                acceleration = maxAcceleration,
-                braking = maxBraking,
-                lat = currentLatitude,
-                lon = currentLongitude,
-                altitude = currentAltitude,
-                speed = currentSpeedKmH
+                leanAngleLeft =
+                    leftVal,
+                leanAngleRight =
+                    rightVal,
+                acceleration =
+                    maxAcceleration,
+                braking =
+                    maxBraking,
+                lat =
+                    currentLatitude,
+                lon =
+                    currentLongitude,
+                altitude =
+                    currentAltitude,
+                speed =
+                    currentSpeedKmH
             )
 
-        listener.onPeakRecorded(entry)
+        listener.onPeakRecorded(
+            entry
+        )
     }
 
     // ========================================================================
@@ -863,28 +1379,54 @@ class SensorProcessor(
         lon2: Double
     ): Double {
 
-        val r = 6371000.0
+        val r =
+            6371000.0
 
         val dLat =
-            Math.toRadians(lat2 - lat1)
+            Math.toRadians(
+                lat2 - lat1
+            )
 
         val dLon =
-            Math.toRadians(lon2 - lon1)
+            Math.toRadians(
+                lon2 - lon1
+            )
 
         val a =
             sin(dLat / 2).pow(2.0) +
-                    cos(Math.toRadians(lat1)) *
-                    cos(Math.toRadians(lat2)) *
+                    cos(
+                        Math.toRadians(lat1)
+                    ) *
+                    cos(
+                        Math.toRadians(lat2)
+                    ) *
                     sin(dLon / 2).pow(2.0)
 
-        val c =
-            2.0 * atan2(
-                sqrt(a),
-                sqrt(1.0 - a)
+        val clampedA =
+            a.coerceIn(
+                0.0,
+                1.0
             )
+
+        val c =
+            2.0 *
+                    atan2(
+                        sqrt(clampedA),
+                        sqrt(1.0 - clampedA)
+                    )
 
         return r * c
     }
+
+    // ========================================================================
+    // VECTOR
+    // ========================================================================
+
+    private data class Vector3(
+        val x: Double,
+        val y: Double,
+        val z: Double
+    )
 
     // ========================================================================
     // QUATERNION
@@ -908,19 +1450,20 @@ class SensorProcessor(
                 )
 
             if (length < 1e-12) {
+
                 return Quaternion(
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0
+                    w = 1.0,
+                    x = 0.0,
+                    y = 0.0,
+                    z = 0.0
                 )
             }
 
             return Quaternion(
-                w / length,
-                x / length,
-                y / length,
-                z / length
+                w = w / length,
+                x = x / length,
+                y = y / length,
+                z = z / length
             )
         }
 
@@ -933,19 +1476,45 @@ class SensorProcessor(
                         z * z
 
             if (normSquared < 1e-12) {
+
                 return Quaternion(
-                    1.0,
-                    0.0,
-                    0.0,
-                    0.0
+                    w = 1.0,
+                    x = 0.0,
+                    y = 0.0,
+                    z = 0.0
                 )
             }
 
             return Quaternion(
-                w = w / normSquared,
-                x = -x / normSquared,
-                y = -y / normSquared,
-                z = -z / normSquared
+                w =
+                    w / normSquared,
+                x =
+                    -x / normSquared,
+                y =
+                    -y / normSquared,
+                z =
+                    -z / normSquared
+            )
+        }
+
+        fun dot(
+            other: Quaternion
+        ): Double {
+
+            return w * other.w +
+                    x * other.x +
+                    y * other.y +
+                    z * other.z
+        }
+
+        operator fun unaryMinus():
+                Quaternion {
+
+            return Quaternion(
+                -w,
+                -x,
+                -y,
+                -z
             )
         }
 

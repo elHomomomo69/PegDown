@@ -1,9 +1,14 @@
 package com.dpm.pegdown.service
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
 import android.location.Location
 import android.os.Binder
+import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.dpm.pegdown.R
@@ -16,20 +21,45 @@ import com.dpm.pegdown.ui.MainActivity
 
 class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener {
 
+    companion object {
+        private const val CHANNEL_ID = "pegdown_recording"
+        private const val NOTIFICATION_ID = 1
+    }
+
     private val binder = LocalBinder()
+
     private lateinit var sensorProcessor: SensorProcessor
     private lateinit var locationTracker: LocationTracker
-    
+
     private var uiListener: RecordingUpdateListener? = null
+
+    private var isTracking = false
+
     val recordedEntries = mutableListOf<TourLogEntry>()
-    
+
     var isRecording = false
         private set
 
     interface RecordingUpdateListener {
-        fun onSensorUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double)
-        fun onAccelUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double)
-        fun onLocationUpdate(location: Location, speedKmH: Double)
+        fun onSensorUpdate(
+            current: Double,
+            tempL: Double,
+            tempR: Double,
+            tourL: Double,
+            tourR: Double
+        )
+
+        fun onAccelUpdate(
+            accel: Double,
+            brake: Double,
+            tourMaxAccel: Double,
+            tourMaxBrake: Double
+        )
+
+        fun onLocationUpdate(
+            location: Location,
+            speedKmH: Double
+        )
     }
 
     inner class LocalBinder : Binder() {
@@ -38,109 +68,314 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
 
     override fun onCreate() {
         super.onCreate()
-        sensorProcessor = SensorProcessor(this, this)
-        locationTracker = LocationTracker(this, this)
-        
+
+        sensorProcessor = SensorProcessor(
+            context = this,
+            listener = this
+        )
+
+        locationTracker = LocationTracker(
+            context = this,
+            listener = this
+        )
+
         createNotificationChannel()
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+    override fun onStartCommand(
+        intent: Intent?,
+        flags: Int,
+        startId: Int
+    ): Int {
         return START_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder = binder
+    override fun onBind(intent: Intent?): IBinder {
+        return binder
+    }
 
     fun setUpdateListener(listener: RecordingUpdateListener?) {
-        this.uiListener = listener
+        uiListener = listener
     }
 
+    // -------------------------------------------------------------------------
+    // Tracking
+    // -------------------------------------------------------------------------
+
+    /**
+     * Startet Sensoren und GPS nur einmal.
+     *
+     * Wichtig:
+     * Diese Methode darf von MainActivity mehrfach aufgerufen werden,
+     * ohne den SensorProcessor jedes Mal neu zu initialisieren.
+     */
     fun startTracking() {
+        if (isTracking) return
+
         sensorProcessor.start()
         locationTracker.start()
+
+        isTracking = true
     }
 
+    /**
+     * Stoppt Tracking nur dann, wenn gerade keine Tour aufgezeichnet wird.
+     */
     fun stopTracking() {
-        if (!isRecording) {
-            sensorProcessor.stop()
-            locationTracker.stop()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
-        }
+        if (isRecording) return
+        if (!isTracking) return
+
+        sensorProcessor.stop()
+        locationTracker.stop()
+
+        isTracking = false
+
+        stopForegroundCompat()
+        stopSelf()
     }
+
+    // -------------------------------------------------------------------------
+    // Recording
+    // -------------------------------------------------------------------------
 
     fun startTourRecording() {
-        isRecording = true
-        sensorProcessor.isRecording = true
+        if (isRecording) return
+
+        // Sicherheit: Tracking muss aktiv sein.
+        startTracking()
+
         recordedEntries.clear()
-        sensorProcessor.recordCurrentState() // Record start point
-        startForeground(1, createNotification("PegDown: Recording active"))
+
+        isRecording = true
+
+        sensorProcessor.startRecording()
+
+        startForeground(
+            NOTIFICATION_ID,
+            createNotification("PegDown: Recording active")
+        )
     }
 
     fun stopTourRecording() {
-        sensorProcessor.recordCurrentState() // Record end point
+        if (!isRecording) return
+
+        /*
+         * finishRecording() darf ausgeführt werden, solange
+         * RecordingService.isRecording noch true ist.
+         *
+         * Dadurch kann ein letzter aktiver Peak über onPeakRecorded()
+         * noch in recordedEntries übernommen werden.
+         */
+        sensorProcessor.finishRecording()
+
         isRecording = false
-        sensorProcessor.isRecording = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
+
+        sensorProcessor.stopRecording()
+
+        stopForegroundCompat()
     }
+
+    // -------------------------------------------------------------------------
+    // Sensor / Calibration
+    // -------------------------------------------------------------------------
 
     fun calibrate() {
         sensorProcessor.calibrate()
     }
 
-    fun getCalibrationOffset(): Double = sensorProcessor.calibrationOffset
+    fun isCalibrated(): Boolean {
+        return sensorProcessor.isCalibrated
+    }
+
+    fun hasSensorData(): Boolean {
+        return sensorProcessor.hasSensorData
+    }
+
+    fun isCalibrationInProgress(): Boolean {
+        return sensorProcessor.isCalibrationInProgress
+    }
+
+    fun getCalibrationOffset(): Double {
+        return sensorProcessor.calibrationOffset
+    }
+
+    // -------------------------------------------------------------------------
+    // Tour
+    // -------------------------------------------------------------------------
 
     fun resetTour() {
+        /*
+         * Eine laufende Aufnahme nicht heimlich löschen.
+         */
+        if (isRecording) return
+
         sensorProcessor.resetTour()
         recordedEntries.clear()
     }
 
-    fun updateSettings(resetMillis: Long, smoothing: Double) {
+    // -------------------------------------------------------------------------
+    // Settings
+    // -------------------------------------------------------------------------
+
+    fun updateSettings(
+        resetMillis: Long,
+        smoothing: Double
+    ) {
         sensorProcessor.resetDurationMillis = resetMillis
         sensorProcessor.smoothingAlpha = smoothing
     }
 
-    override fun onLeanAngleUpdate(current: Double, tempL: Double, tempR: Double, tourL: Double, tourR: Double) {
-        uiListener?.onSensorUpdate(current, tempL, tempR, tourL, tourR)
+    // -------------------------------------------------------------------------
+    // SensorUpdateListener
+    // -------------------------------------------------------------------------
+
+    override fun onLeanAngleUpdate(
+        current: Double,
+        tempL: Double,
+        tempR: Double,
+        tourL: Double,
+        tourR: Double
+    ) {
+        uiListener?.onSensorUpdate(
+            current,
+            tempL,
+            tempR,
+            tourL,
+            tourR
+        )
     }
 
-    override fun onAccelerationUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double) {
-        uiListener?.onAccelUpdate(accel, brake, tourMaxAccel, tourMaxBrake)
+    override fun onAccelerationUpdate(
+        accel: Double,
+        brake: Double,
+        tourMaxAccel: Double,
+        tourMaxBrake: Double
+    ) {
+        uiListener?.onAccelUpdate(
+            accel,
+            brake,
+            tourMaxAccel,
+            tourMaxBrake
+        )
     }
 
     override fun onPeakRecorded(entry: TourLogEntry) {
-        if (isRecording) {
-            recordedEntries.add(entry)
-        }
+        if (!isRecording) return
+
+        recordedEntries.add(entry)
     }
 
-    override fun onLocationUpdate(location: Location, speedKmH: Double) {
+    // -------------------------------------------------------------------------
+    // LocationUpdateListener
+    // -------------------------------------------------------------------------
+
+    override fun onLocationUpdate(
+        location: Location,
+        speedKmH: Double
+    ) {
         sensorProcessor.currentLatitude = location.latitude
         sensorProcessor.currentLongitude = location.longitude
         sensorProcessor.currentAltitude = location.altitude
         sensorProcessor.currentSpeedKmH = speedKmH
-        uiListener?.onLocationUpdate(location, speedKmH)
+
+        uiListener?.onLocationUpdate(
+            location,
+            speedKmH
+        )
     }
 
-    private fun createNotification(content: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+    // -------------------------------------------------------------------------
+    // Notification
+    // -------------------------------------------------------------------------
 
-        return NotificationCompat.Builder(this, "recording_channel")
-            .setContentTitle("PegDown Tracking")
-            .setContentText(content)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            "PegDown Aufzeichnung",
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = "Status der PegDown-Aufzeichnung"
+        }
+
+        val manager = getSystemService(
+            NotificationManager::class.java
+        )
+
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun createNotification(
+        text: String
+    ): Notification {
+
+        val intent = Intent(
+            this,
+            MainActivity::class.java
+        ).apply {
+            flags =
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        PendingIntent.FLAG_IMMUTABLE
+                    } else {
+                        0
+                    }
+        )
+
+        return NotificationCompat.Builder(
+            this,
+            CHANNEL_ID
+        )
+            .setSmallIcon(R.drawable.ic_motorcycle_rear)
+            .setContentTitle("PegDown")
+            .setContentText(text)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            "recording_channel",
-            "Recording Service",
-            NotificationManager.IMPORTANCE_LOW,
-        )
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
+    override fun onDestroy() {
+
+        /*
+         * Falls Android den Service beendet, sauber aufräumen.
+         */
+        if (isRecording) {
+            sensorProcessor.finishRecording()
+            sensorProcessor.stopRecording()
+            isRecording = false
+        }
+
+        if (isTracking) {
+            sensorProcessor.stop()
+            locationTracker.stop()
+            isTracking = false
+        }
+
+        uiListener = null
+
+        super.onDestroy()
+    }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
     }
 }
