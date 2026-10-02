@@ -13,6 +13,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
+import kotlin.math.acos
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
@@ -36,6 +37,11 @@ class SensorProcessor(
     private val linearAccelSensor =
         sensorManager.getDefaultSensor(
             Sensor.TYPE_LINEAR_ACCELERATION
+        )
+
+    private val gyroscopeSensor =
+        sensorManager.getDefaultSensor(
+            Sensor.TYPE_GYROSCOPE
         )
 
     private val handler =
@@ -101,6 +107,36 @@ class SensorProcessor(
      * Gemittelte Orientierung während der Kalibrierung.
      */
     private var calibrationQuaternion: Quaternion? = null
+
+    /**
+     * Schwerkraftrichtung im Telefonrahmen zum Kalibrierzeitpunkt.
+     * Vergleiche dieser Richtung sind unabhängig von der Yaw-Drehung.
+     */
+    private var calibrationGravity: Vector3? = null
+
+    /** Aus der Gyroskop-Integration geschätzte Geräteorientierung. */
+    private var gyroOrientation: Quaternion? = null
+    internal var gyroLeanAngle = 0.0
+        private set
+
+    private var gyroBiasX = 0.0
+    private var gyroBiasY = 0.0
+    private var gyroBiasZ = 0.0
+    private var calibrationGyroXSum = 0.0
+    private var calibrationGyroYSum = 0.0
+    private var calibrationGyroZSum = 0.0
+    private var calibrationGyroSamples = 0
+    private var lastGyroTimestampNanos = 0L
+    private var gyroEstimateInitialized = false
+
+    /** Dynamische Beschleunigung, die die Schwerkraftkorrektur vorübergehend sperrt. */
+    private var dynamicAccelerationMagnitude = 0.0
+    private var gravityCorrectionEnabled = false
+    internal var gyroFusionAvailable = gyroscopeSensor != null
+    internal var linearAccelerationAvailable = linearAccelSensor != null
+
+    private val gravityCorrectionAlpha = 0.05
+    private val dynamicAccelerationThreshold = 0.6
 
     /**
      * Relative Rotation:
@@ -242,6 +278,11 @@ class SensorProcessor(
 
         rawLeanAngle = 0.0
         currentFusedAngle = 0.0
+        gyroLeanAngle = 0.0
+        gyroOrientation = null
+        lastGyroTimestampNanos = 0L
+        gyroEstimateInitialized = false
+        dynamicAccelerationMagnitude = 0.0
 
         /*
          * Die bestehende Kalibrierung bleibt erhalten.
@@ -265,6 +306,18 @@ class SensorProcessor(
                 SensorManager.SENSOR_DELAY_GAME
             )
         }
+
+        gyroscopeSensor?.let {
+            sensorManager.registerListener(
+                this,
+                it,
+                SensorManager.SENSOR_DELAY_GAME
+            )
+        }
+
+        // Ohne lineare Beschleunigung kann die Schwerkraft während Kurven
+        // nicht zuverlässig von Querbeschleunigung unterschieden werden.
+        gravityCorrectionEnabled = linearAccelerationAvailable
     }
 
     fun stop() {
@@ -304,6 +357,12 @@ class SensorProcessor(
         }
 
         calibrationQuaternions.clear()
+
+        calibrationGyroXSum = 0.0
+        calibrationGyroYSum = 0.0
+        calibrationGyroZSum = 0.0
+        calibrationGyroSamples = 0
+        lastGyroTimestampNanos = 0L
 
         calibrationAccelX = 0.0
         calibrationAccelY = 0.0
@@ -386,9 +445,24 @@ class SensorProcessor(
             ).normalized()
 
         calibrationQuaternion = averaged
+        calibrationGravity = gravityInDeviceFrame(averaged)
+        if (calibrationGyroSamples > 0) {
+            val gyroSampleCount = calibrationGyroSamples.toDouble()
+            gyroBiasX = calibrationGyroXSum / gyroSampleCount
+            gyroBiasY = calibrationGyroYSum / gyroSampleCount
+            gyroBiasZ = calibrationGyroZSum / gyroSampleCount
+        } else {
+            gyroBiasX = 0.0
+            gyroBiasY = 0.0
+            gyroBiasZ = 0.0
+        }
+        gyroOrientation = averaged
+        gyroLeanAngle = 0.0
+        gyroEstimateInitialized = true
+        lastGyroTimestampNanos = 0L
 
         /*
-         * Die Quaternion ist jetzt der Nullpunkt.
+         * Die Schwerkraftrichtung und das Gyroskop sind jetzt kalibriert.
          */
         calibrationOffset = 0.0
 
@@ -503,6 +577,10 @@ class SensorProcessor(
             Sensor.TYPE_LINEAR_ACCELERATION -> {
                 handleLinearAcceleration(event)
             }
+
+            Sensor.TYPE_GYROSCOPE -> {
+                handleGyroscope(event.values, event.timestamp)
+            }
         }
     }
 
@@ -590,49 +668,158 @@ class SensorProcessor(
         relativeQuaternion = relative
 
         /*
-         * Schräglage = Z-Twist.
-         *
-         * links  = negativ
-         * rechts = positiv
+         * Schräglage aus der Schwerkraftrichtung in der Telefonebene.
+         * Eine Yaw-Drehung um die Erd-Hochachse verändert diesen Vektor
+         * nicht und kann deshalb nicht als Schräglage erscheinen.
          */
+        val referenceGravity = calibrationGravity ?: return
+        val currentGravity = gravityInDeviceFrame(quaternion)
         val calculatedLean =
-            extractZTwistAngle(relative)
+            extractBankAngle(referenceGravity, currentGravity)
 
-        rawLeanAngle = calculatedLean
-
-        /*
-         * Kleine Sensorbewegungen entfernen.
-         */
-        val targetAngle =
-            if (abs(rawLeanAngle) < 0.20) {
-                0.0
-            } else {
-                rawLeanAngle
+        if (!gyroFusionAvailable) {
+            // Fallback für Geräte ohne Gyroskop.
+            if (
+                !gyroEstimateInitialized ||
+                !gravityCorrectionEnabled ||
+                dynamicAccelerationMagnitude < dynamicAccelerationThreshold
+            ) {
+                gyroLeanAngle = calculatedLean
             }
-
-        /*
-         * Sicherheitsgrenze.
-         */
-        val limitedAngle =
-            targetAngle.coerceIn(
-                -65.0,
-                65.0
+            gyroEstimateInitialized = true
+        } else if (!gyroEstimateInitialized) {
+            gyroOrientation = quaternion
+            gyroEstimateInitialized = true
+            gyroLeanAngle = calculatedLean
+        } else if (
+            gravityCorrectionEnabled &&
+            dynamicAccelerationMagnitude < dynamicAccelerationThreshold
+        ) {
+            // Gesamte Orientierung nur bei geringer dynamischer Beschleunigung
+            // langsam an den Rotation Vector angleichen.
+            gyroOrientation = slerp(
+                gyroOrientation ?: quaternion,
+                quaternion,
+                gravityCorrectionAlpha
             )
-
-        /*
-         * Anzeige glätten.
-         */
-        val alpha =
-            smoothingAlpha.coerceIn(
-                0.01,
-                0.50
+            gyroLeanAngle = extractBankAngle(
+                referenceGravity,
+                gravityInDeviceFrame(gyroOrientation!!)
             )
+        }
 
-        currentFusedAngle +=
-            alpha *
-                    (limitedAngle - currentFusedAngle)
+        updateDisplayedLeanAngle()
+    }
 
+    /**
+     * Integriert alle drei Gyroskopachsen. Eine Drehung um die Welt-Hochachse
+     * darf bei geneigtem Gerät nicht als Rollrate missverstanden werden.
+     */
+    internal fun handleGyroscope(values: FloatArray, timestampNanos: Long) {
+        if (values.size < 3) return
+
+        val measuredX = values[0].toDouble()
+        val measuredY = values[1].toDouble()
+        val measuredZ = values[2].toDouble()
+
+        if (calibrationInProgress) {
+            calibrationGyroXSum += measuredX
+            calibrationGyroYSum += measuredY
+            calibrationGyroZSum += measuredZ
+            calibrationGyroSamples++
+            lastGyroTimestampNanos = timestampNanos
+            return
+        }
+
+        if (calibrationQuaternion == null || !gyroEstimateInitialized) {
+            lastGyroTimestampNanos = timestampNanos
+            return
+        }
+
+        val previousTimestamp = lastGyroTimestampNanos
+        lastGyroTimestampNanos = timestampNanos
+        if (previousTimestamp <= 0L || timestampNanos <= previousTimestamp) return
+
+        val elapsedSeconds = (timestampNanos - previousTimestamp) / 1_000_000_000.0
+        // Große Zeitlücken nicht integrieren: dabei würde ein falscher Sprung entstehen.
+        if (elapsedSeconds > 0.1) return
+
+        val orientation = gyroOrientation ?: return
+        gyroOrientation = integrateGyroscope(
+            orientation,
+            measuredX - gyroBiasX,
+            measuredY - gyroBiasY,
+            measuredZ - gyroBiasZ,
+            elapsedSeconds
+        )
+
+        val referenceGravity = calibrationGravity ?: return
+        gyroLeanAngle = extractBankAngle(
+            referenceGravity,
+            gravityInDeviceFrame(gyroOrientation!!)
+        )
+        updateDisplayedLeanAngle()
+    }
+
+    private fun updateDisplayedLeanAngle() {
+        rawLeanAngle = gyroLeanAngle
+        val targetAngle =
+            if (abs(rawLeanAngle) < 0.20) 0.0 else rawLeanAngle
+        val limitedAngle = targetAngle.coerceIn(-65.0, 65.0)
+        val alpha = smoothingAlpha.coerceIn(0.01, 0.50)
+        currentFusedAngle += alpha * (limitedAngle - currentFusedAngle)
         processLeanAngle()
+    }
+
+    private fun integrateGyroscope(
+        orientation: Quaternion,
+        rateX: Double,
+        rateY: Double,
+        rateZ: Double,
+        elapsedSeconds: Double
+    ): Quaternion {
+        val speed = sqrt(rateX * rateX + rateY * rateY + rateZ * rateZ)
+        if (speed < 1e-9 || elapsedSeconds <= 0.0) return orientation
+
+        val halfAngle = speed * elapsedSeconds / 2.0
+        val scale = sin(halfAngle) / speed
+        val delta = Quaternion(
+            w = cos(halfAngle),
+            x = rateX * scale,
+            y = rateY * scale,
+            z = rateZ * scale
+        )
+        return (orientation * delta).normalized()
+    }
+
+    private fun slerp(from: Quaternion, to: Quaternion, fraction: Double): Quaternion {
+        var target = to
+        var dot = from.dot(target)
+        if (dot < 0.0) {
+            target = -target
+            dot = -dot
+        }
+
+        val amount = fraction.coerceIn(0.0, 1.0)
+        if (dot > 0.9995) {
+            return Quaternion(
+                from.w + amount * (target.w - from.w),
+                from.x + amount * (target.x - from.x),
+                from.y + amount * (target.y - from.y),
+                from.z + amount * (target.z - from.z)
+            ).normalized()
+        }
+
+        val angle = acos(dot.coerceIn(-1.0, 1.0))
+        val denominator = sin(angle)
+        val fromScale = sin((1.0 - amount) * angle) / denominator
+        val targetScale = sin(amount * angle) / denominator
+        return Quaternion(
+            fromScale * from.w + targetScale * target.w,
+            fromScale * from.x + targetScale * target.x,
+            fromScale * from.y + targetScale * target.y,
+            fromScale * from.z + targetScale * target.z
+        ).normalized()
     }
 
     // ========================================================================
@@ -700,26 +887,38 @@ class SensorProcessor(
     }
 
     // ========================================================================
-    // LEAN = Z TWIST
+    // GRAVITY-BASED BANK ANGLE
     // ========================================================================
 
-    private fun extractZTwistAngle(
-        q: Quaternion
-    ): Double {
+    /**
+     * Androids Rotation Vector beschreibt die Geräteorientierung relativ
+     * zum Weltkoordinatensystem. Welt-Z zeigt nach oben. Invertieren der
+     * Orientierung liefert die Schwerkraftrichtung im Gerätekoordinatensystem.
+     */
+    private fun gravityInDeviceFrame(orientation: Quaternion): Vector3 =
+        rotateVector(
+            orientation.inverse(),
+            Vector3(0.0, 0.0, 1.0)
+        )
 
-        val angle =
-            atan2(
-                2.0 * q.w * q.z,
-                1.0 - 2.0 * q.z * q.z
-            )
+    /**
+     * Winkel zwischen den projizierten Schwerkraftvektoren um die Geräte-Z-Achse.
+     * Bei der vorgesehenen Montage liegt diese Achse in Fahrtrichtung.
+     */
+    private fun extractBankAngle(reference: Vector3, current: Vector3): Double {
+        val referenceLength = sqrt(reference.x * reference.x + reference.y * reference.y)
+        val currentLength = sqrt(current.x * current.x + current.y * current.y)
+        if (referenceLength < 1e-6 || currentLength < 1e-6) return 0.0
 
-        /*
-         * Gewünschte Richtung:
-         *
-         * links  = -
-         * rechts = +
-         */
-        return -Math.toDegrees(angle)
+        val refX = reference.x / referenceLength
+        val refY = reference.y / referenceLength
+        val curX = current.x / currentLength
+        val curY = current.y / currentLength
+
+        val crossZ = refX * curY - refY * curX
+        val dot = refX * curX + refY * curY
+        // Bewahrt das Vorzeichen der bisherigen Z-Twist-Berechnung.
+        return Math.toDegrees(atan2(crossZ, dot))
     }
 
     // ========================================================================
@@ -738,6 +937,8 @@ class SensorProcessor(
 
         val z =
             event.values[2].toDouble()
+
+        updateDynamicAcceleration(event.values)
 
         /*
          * Während der Kalibrierung Werte sammeln.
@@ -821,6 +1022,14 @@ class SensorProcessor(
         processAcceleration(
             forwardG
         )
+    }
+
+    internal fun updateDynamicAcceleration(values: FloatArray) {
+        if (values.size < 3) return
+        val x = values[0].toDouble()
+        val y = values[1].toDouble()
+        val z = values[2].toDouble()
+        dynamicAccelerationMagnitude = sqrt(x * x + y * y + z * z)
     }
 
     // ========================================================================
