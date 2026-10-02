@@ -11,8 +11,22 @@ class LocationTracker(
 ) {
     private val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
-    private val androidLocationListener = LocationListener { location ->
-        processLocation(location)
+    private val androidLocationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            processLocation(location)
+        }
+
+        override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {
+            // Needed for API < 29
+        }
+
+        override fun onProviderEnabled(provider: String) {
+            // Needed for API < 29
+        }
+
+        override fun onProviderDisabled(provider: String) {
+            // Needed for API < 29
+        }
     }
 
     private fun processLocation(location: Location) {
