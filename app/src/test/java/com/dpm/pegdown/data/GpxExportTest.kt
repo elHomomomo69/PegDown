@@ -53,6 +53,39 @@ class GpxExportTest {
     }
 
     @Test
+    fun `generateGpxString sorts track points by millisecond timestamp`() {
+        val entries = listOf(
+            createEntry(52.00002, 13.0).copy(
+                timestamp = "2024-01-01 12:00:02.300",
+                leanAngleLeft = 5.0
+            ),
+            createEntry(52.00001, 13.0).copy(
+                timestamp = "2024-01-01 12:00:01.900",
+                leanAngleRight = 4.0
+            ),
+            createEntry(52.00003, 13.0).copy(
+                timestamp = "2024-01-01 12:00:02.100",
+                leanAngleLeft = 3.0
+            )
+        )
+
+        val gpx = tourExporter.generateGpxString("OrderedTour", entries)
+        val exportedTimes = Regex("<time>(.*?)</time>")
+            .findAll(gpx)
+            .map { it.groupValues[1] }
+            .toList()
+
+        assertEquals(
+            listOf(
+                "2024-01-01T12:00:01.900Z",
+                "2024-01-01T12:00:02.100Z",
+                "2024-01-01T12:00:02.300Z"
+            ),
+            exportedTimes
+        )
+    }
+
+    @Test
     fun `generateGpxString escapes special characters in tour name`() {
         val tourName = "Ride & <one> \"great\""
         val xml = tourExporter.generateGpxString(tourName, listOf(createEntry(52.0, 13.0)))

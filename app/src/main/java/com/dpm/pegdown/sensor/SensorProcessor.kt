@@ -5,6 +5,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import com.dpm.pegdown.model.TourLogEntry
@@ -13,7 +14,6 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import kotlin.math.abs
-import kotlin.math.acos
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.pow
@@ -34,14 +34,18 @@ class SensorProcessor(
             Sensor.TYPE_GAME_ROTATION_VECTOR
         )
 
+    private val accelerometerSensor =
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+    private val gyroscopeSensor =
+        sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+
+    private val magnetometerSensor =
+        sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+
     private val linearAccelSensor =
         sensorManager.getDefaultSensor(
             Sensor.TYPE_LINEAR_ACCELERATION
-        )
-
-    private val gyroscopeSensor =
-        sensorManager.getDefaultSensor(
-            Sensor.TYPE_GYROSCOPE
         )
 
     private val handler =
@@ -69,7 +73,7 @@ class SensorProcessor(
 
     private val gpxDateFormat =
         SimpleDateFormat(
-            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss.SSS",
             Locale.US
         ).apply {
             timeZone = TimeZone.getTimeZone("UTC")
@@ -101,6 +105,19 @@ class SensorProcessor(
 
     private var currentFusedAngle = 0.0
 
+    private data class LeanTimestampSample(
+        val timestampNanos: Long,
+        val leanDegrees: Double,
+        val calibrated: Boolean,
+    )
+
+    private val leanTimestampSamples = ArrayDeque<LeanTimestampSample>()
+    private val leanTimestampSamplesLock = Any()
+    private val leanHistoryDurationNanos = 15_000_000_000L
+    private val maxLeanHistorySamples = 1_500
+    private val maxLeanInterpolationGapNanos = 500_000_000L
+    private val maxLeanNearestSampleAgeNanos = 250_000_000L
+
     private var currentQuaternion: Quaternion? = null
 
     /**
@@ -113,30 +130,6 @@ class SensorProcessor(
      * Vergleiche dieser Richtung sind unabhängig von der Yaw-Drehung.
      */
     private var calibrationGravity: Vector3? = null
-
-    /** Aus der Gyroskop-Integration geschätzte Geräteorientierung. */
-    private var gyroOrientation: Quaternion? = null
-    internal var gyroLeanAngle = 0.0
-        private set
-
-    private var gyroBiasX = 0.0
-    private var gyroBiasY = 0.0
-    private var gyroBiasZ = 0.0
-    private var calibrationGyroXSum = 0.0
-    private var calibrationGyroYSum = 0.0
-    private var calibrationGyroZSum = 0.0
-    private var calibrationGyroSamples = 0
-    private var lastGyroTimestampNanos = 0L
-    private var gyroEstimateInitialized = false
-
-    /** Dynamische Beschleunigung, die die Schwerkraftkorrektur vorübergehend sperrt. */
-    private var dynamicAccelerationMagnitude = 0.0
-    private var gravityCorrectionEnabled = false
-    internal var gyroFusionAvailable = gyroscopeSensor != null
-    internal var linearAccelerationAvailable = linearAccelSensor != null
-
-    private val gravityCorrectionAlpha = 0.05
-    private val dynamicAccelerationThreshold = 0.6
 
     /**
      * Relative Rotation:
@@ -246,6 +239,37 @@ class SensorProcessor(
     var currentAltitude = 0.0
     var currentSpeedKmH = 0.0
 
+    fun currentLeanAngleDegrees(): Double = currentFusedAngle - calibrationOffset
+
+    /** Returns the lean estimate aligned to a location fix's monotonic timestamp. */
+    fun leanAngleAt(timestampNanos: Long): Double? {
+        if (timestampNanos <= 0L) return null
+
+        val samples = synchronized(leanTimestampSamplesLock) {
+            leanTimestampSamples.toList()
+        }
+        if (samples.isEmpty()) return null
+
+        val afterIndex = samples.indexOfFirst { it.timestampNanos >= timestampNanos }
+        if (afterIndex > 0) {
+            val before = samples[afterIndex - 1]
+            val after = samples[afterIndex]
+            val gap = after.timestampNanos - before.timestampNanos
+            if (before.calibrated && after.calibrated && gap in 1..maxLeanInterpolationGapNanos) {
+                val fraction = (timestampNanos - before.timestampNanos).toDouble() / gap
+                return (before.leanDegrees + (after.leanDegrees - before.leanDegrees) * fraction)
+                    .coerceIn(-65.0, 65.0)
+            }
+        }
+
+        val nearest = samples.minByOrNull { abs(it.timestampNanos - timestampNanos) } ?: return null
+        return if (nearest.calibrated && abs(nearest.timestampNanos - timestampNanos) <= maxLeanNearestSampleAgeNanos) {
+            nearest.leanDegrees.coerceIn(-65.0, 65.0)
+        } else {
+            null
+        }
+    }
+
     /**
      * GPS-Daten des letzten tatsächlich gespeicherten Eintrags.
      */
@@ -278,11 +302,6 @@ class SensorProcessor(
 
         rawLeanAngle = 0.0
         currentFusedAngle = 0.0
-        gyroLeanAngle = 0.0
-        gyroOrientation = null
-        lastGyroTimestampNanos = 0L
-        gyroEstimateInitialized = false
-        dynamicAccelerationMagnitude = 0.0
 
         /*
          * Die bestehende Kalibrierung bleibt erhalten.
@@ -291,33 +310,20 @@ class SensorProcessor(
          * gestartet wird.
          */
 
-        rotationSensor?.let {
+        listOfNotNull(
+            accelerometerSensor,
+            gyroscopeSensor,
+            magnetometerSensor,
+            rotationSensor,
+            linearAccelSensor,
+        ).forEach { sensor ->
             sensorManager.registerListener(
                 this,
-                it,
-                SensorManager.SENSOR_DELAY_GAME
+                sensor,
+                SensorManager.SENSOR_DELAY_GAME,
             )
         }
 
-        linearAccelSensor?.let {
-            sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_GAME
-            )
-        }
-
-        gyroscopeSensor?.let {
-            sensorManager.registerListener(
-                this,
-                it,
-                SensorManager.SENSOR_DELAY_GAME
-            )
-        }
-
-        // Ohne lineare Beschleunigung kann die Schwerkraft während Kurven
-        // nicht zuverlässig von Querbeschleunigung unterschieden werden.
-        gravityCorrectionEnabled = linearAccelerationAvailable
     }
 
     fun stop() {
@@ -357,12 +363,6 @@ class SensorProcessor(
         }
 
         calibrationQuaternions.clear()
-
-        calibrationGyroXSum = 0.0
-        calibrationGyroYSum = 0.0
-        calibrationGyroZSum = 0.0
-        calibrationGyroSamples = 0
-        lastGyroTimestampNanos = 0L
 
         calibrationAccelX = 0.0
         calibrationAccelY = 0.0
@@ -446,21 +446,6 @@ class SensorProcessor(
 
         calibrationQuaternion = averaged
         calibrationGravity = gravityInDeviceFrame(averaged)
-        if (calibrationGyroSamples > 0) {
-            val gyroSampleCount = calibrationGyroSamples.toDouble()
-            gyroBiasX = calibrationGyroXSum / gyroSampleCount
-            gyroBiasY = calibrationGyroYSum / gyroSampleCount
-            gyroBiasZ = calibrationGyroZSum / gyroSampleCount
-        } else {
-            gyroBiasX = 0.0
-            gyroBiasY = 0.0
-            gyroBiasZ = 0.0
-        }
-        gyroOrientation = averaged
-        gyroLeanAngle = 0.0
-        gyroEstimateInitialized = true
-        lastGyroTimestampNanos = 0L
-
         /*
          * Die Schwerkraftrichtung und das Gyroskop sind jetzt kalibriert.
          */
@@ -572,16 +557,75 @@ class SensorProcessor(
 
             Sensor.TYPE_GAME_ROTATION_VECTOR -> {
                 handleRotationVector(event.values)
+                recordLeanTimestampSample(event.timestamp)
             }
 
             Sensor.TYPE_LINEAR_ACCELERATION -> {
                 handleLinearAcceleration(event)
             }
 
-            Sensor.TYPE_GYROSCOPE -> {
-                handleGyroscope(event.values, event.timestamp)
+        }
+
+        if (isRecording) {
+            listener.onDiagnosticSensorSample(
+                sensor = event.sensor,
+                timestampNanos = event.timestamp,
+                accuracy = event.accuracy,
+                values = event.values.copyOf(),
+                estimatedLeanDegrees = currentFusedAngle - calibrationOffset,
+                calibrated = isCalibrated,
+            )
+        }
+    }
+
+    private fun recordLeanTimestampSample(timestampNanos: Long) {
+        if (timestampNanos <= 0L) return
+        val sample = LeanTimestampSample(
+            timestampNanos = timestampNanos,
+            leanDegrees = (currentFusedAngle - calibrationOffset).coerceIn(-65.0, 65.0),
+            calibrated = isCalibrated,
+        )
+        synchronized(leanTimestampSamplesLock) {
+            if (leanTimestampSamples.lastOrNull()?.timestampNanos?.let { timestampNanos <= it } == true) return
+            leanTimestampSamples.addLast(sample)
+            val cutoff = timestampNanos - leanHistoryDurationNanos
+            while (leanTimestampSamples.isNotEmpty() &&
+                (leanTimestampSamples.first().timestampNanos < cutoff || leanTimestampSamples.size > maxLeanHistorySamples)
+            ) {
+                leanTimestampSamples.removeFirst()
             }
         }
+    }
+
+    fun diagnosticSensors(): List<Sensor> =
+        listOfNotNull(
+            accelerometerSensor,
+            gyroscopeSensor,
+            magnetometerSensor,
+            rotationSensor,
+            linearAccelSensor,
+        )
+
+    fun diagnosticSessionMetadata(): String {
+        val calibration = calibrationQuaternion
+        val gravity = calibrationGravity
+        return listOf(
+            "manufacturer=" + Build.MANUFACTURER,
+            "model=" + Build.MODEL,
+            "android_sdk=" + Build.VERSION.SDK_INT,
+            "calibrated=" + isCalibrated,
+            "calibration_quaternion_wxyz=" + calibration?.let {
+                listOf(it.w, it.x, it.y, it.z).joinToString(";")
+            }.orEmpty(),
+            "calibration_gravity_xyz=" + gravity?.let {
+                listOf(it.x, it.y, it.z).joinToString(";")
+            }.orEmpty(),
+            "display_smoothing_alpha=" + smoothingAlpha,
+            "mount_axis_assumption=device_z_along_motorcycle_forward",
+            "imu_sampling_hint_us=20000",
+            "gps_interval_diagnostic_ms=500",
+            "gps_min_distance_diagnostic_m=0",
+        ).joinToString("; ")
     }
 
     // ========================================================================
@@ -659,167 +703,23 @@ class SensorProcessor(
         // RELATIVE ROTATION
         // --------------------------------------------------------------------
 
-        val relative =
-            calculateRelativeQuaternion(
-                calibrationQuaternion!!,
-                quaternion
-            )
-
-        relativeQuaternion = relative
-
         /*
          * Schräglage aus der Schwerkraftrichtung in der Telefonebene.
-         * Eine Yaw-Drehung um die Erd-Hochachse verändert diesen Vektor
-         * nicht und kann deshalb nicht als Schräglage erscheinen.
+         * Die Android-Rotation-Vector-Fusion kombiniert Gyroskop und
+         * Beschleunigung und vermeidet eine eigene, driftende Gyro-Integration.
          */
         val referenceGravity = calibrationGravity ?: return
         val currentGravity = gravityInDeviceFrame(quaternion)
         val calculatedLean =
             extractBankAngle(referenceGravity, currentGravity)
 
-        if (!gyroFusionAvailable) {
-            // Fallback für Geräte ohne Gyroskop.
-            if (
-                !gyroEstimateInitialized ||
-                !gravityCorrectionEnabled ||
-                dynamicAccelerationMagnitude < dynamicAccelerationThreshold
-            ) {
-                gyroLeanAngle = calculatedLean
-            }
-            gyroEstimateInitialized = true
-        } else if (!gyroEstimateInitialized) {
-            gyroOrientation = quaternion
-            gyroEstimateInitialized = true
-            gyroLeanAngle = calculatedLean
-        } else if (
-            gravityCorrectionEnabled &&
-            dynamicAccelerationMagnitude < dynamicAccelerationThreshold
-        ) {
-            // Gesamte Orientierung nur bei geringer dynamischer Beschleunigung
-            // langsam an den Rotation Vector angleichen.
-            gyroOrientation = slerp(
-                gyroOrientation ?: quaternion,
-                quaternion,
-                gravityCorrectionAlpha
-            )
-            gyroLeanAngle = extractBankAngle(
-                referenceGravity,
-                gravityInDeviceFrame(gyroOrientation!!)
-            )
-        }
-
-        updateDisplayedLeanAngle()
-    }
-
-    /**
-     * Integriert alle drei Gyroskopachsen. Eine Drehung um die Welt-Hochachse
-     * darf bei geneigtem Gerät nicht als Rollrate missverstanden werden.
-     */
-    internal fun handleGyroscope(values: FloatArray, timestampNanos: Long) {
-        if (values.size < 3) return
-
-        val measuredX = values[0].toDouble()
-        val measuredY = values[1].toDouble()
-        val measuredZ = values[2].toDouble()
-
-        if (calibrationInProgress) {
-            calibrationGyroXSum += measuredX
-            calibrationGyroYSum += measuredY
-            calibrationGyroZSum += measuredZ
-            calibrationGyroSamples++
-            lastGyroTimestampNanos = timestampNanos
-            return
-        }
-
-        if (calibrationQuaternion == null || !gyroEstimateInitialized) {
-            lastGyroTimestampNanos = timestampNanos
-            return
-        }
-
-        val previousTimestamp = lastGyroTimestampNanos
-        lastGyroTimestampNanos = timestampNanos
-        if (previousTimestamp <= 0L || timestampNanos <= previousTimestamp) return
-
-        val elapsedSeconds = (timestampNanos - previousTimestamp) / 1_000_000_000.0
-        // Große Zeitlücken nicht integrieren: dabei würde ein falscher Sprung entstehen.
-        if (elapsedSeconds > 0.1) return
-
-        val orientation = gyroOrientation ?: return
-        gyroOrientation = integrateGyroscope(
-            orientation,
-            measuredX - gyroBiasX,
-            measuredY - gyroBiasY,
-            measuredZ - gyroBiasZ,
-            elapsedSeconds
-        )
-
-        val referenceGravity = calibrationGravity ?: return
-        gyroLeanAngle = extractBankAngle(
-            referenceGravity,
-            gravityInDeviceFrame(gyroOrientation!!)
-        )
-        updateDisplayedLeanAngle()
-    }
-
-    private fun updateDisplayedLeanAngle() {
-        rawLeanAngle = gyroLeanAngle
+        rawLeanAngle = calculatedLean
         val targetAngle =
             if (abs(rawLeanAngle) < 0.20) 0.0 else rawLeanAngle
         val limitedAngle = targetAngle.coerceIn(-65.0, 65.0)
         val alpha = smoothingAlpha.coerceIn(0.01, 0.50)
         currentFusedAngle += alpha * (limitedAngle - currentFusedAngle)
         processLeanAngle()
-    }
-
-    private fun integrateGyroscope(
-        orientation: Quaternion,
-        rateX: Double,
-        rateY: Double,
-        rateZ: Double,
-        elapsedSeconds: Double
-    ): Quaternion {
-        val speed = sqrt(rateX * rateX + rateY * rateY + rateZ * rateZ)
-        if (speed < 1e-9 || elapsedSeconds <= 0.0) return orientation
-
-        val halfAngle = speed * elapsedSeconds / 2.0
-        val scale = sin(halfAngle) / speed
-        val delta = Quaternion(
-            w = cos(halfAngle),
-            x = rateX * scale,
-            y = rateY * scale,
-            z = rateZ * scale
-        )
-        return (orientation * delta).normalized()
-    }
-
-    private fun slerp(from: Quaternion, to: Quaternion, fraction: Double): Quaternion {
-        var target = to
-        var dot = from.dot(target)
-        if (dot < 0.0) {
-            target = -target
-            dot = -dot
-        }
-
-        val amount = fraction.coerceIn(0.0, 1.0)
-        if (dot > 0.9995) {
-            return Quaternion(
-                from.w + amount * (target.w - from.w),
-                from.x + amount * (target.x - from.x),
-                from.y + amount * (target.y - from.y),
-                from.z + amount * (target.z - from.z)
-            ).normalized()
-        }
-
-        val angle = acos(dot.coerceIn(-1.0, 1.0))
-        val denominator = sin(angle)
-        val fromScale = sin((1.0 - amount) * angle) / denominator
-        val targetScale = sin(amount * angle) / denominator
-        return Quaternion(
-            fromScale * from.w + targetScale * target.w,
-            fromScale * from.x + targetScale * target.x,
-            fromScale * from.y + targetScale * target.y,
-            fromScale * from.z + targetScale * target.z
-        ).normalized()
     }
 
     // ========================================================================
@@ -938,8 +838,6 @@ class SensorProcessor(
         val z =
             event.values[2].toDouble()
 
-        updateDynamicAcceleration(event.values)
-
         /*
          * Während der Kalibrierung Werte sammeln.
          *
@@ -1022,14 +920,6 @@ class SensorProcessor(
         processAcceleration(
             forwardG
         )
-    }
-
-    internal fun updateDynamicAcceleration(values: FloatArray) {
-        if (values.size < 3) return
-        val x = values[0].toDouble()
-        val y = values[1].toDouble()
-        val z = values[2].toDouble()
-        dynamicAccelerationMagnitude = sqrt(x * x + y * y + z * z)
     }
 
     // ========================================================================
@@ -1480,7 +1370,11 @@ class SensorProcessor(
     }
 
     /** Fügt bei jedem gültigen Standort-Update einen Punkt zur Tourspur hinzu. */
-    fun recordLocation(location: android.location.Location, speedKmH: Double) {
+    fun recordLocation(
+        location: android.location.Location,
+        speedKmH: Double,
+        leanAtFixDegrees: Double? = null,
+    ) {
         if (!isRecording || !location.hasAccuracy() || location.accuracy > 100f) return
         if (location.latitude !in -90.0..90.0 || location.longitude !in -180.0..180.0) return
 
@@ -1489,7 +1383,9 @@ class SensorProcessor(
         currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
         currentSpeedKmH = speedKmH
 
-        val lean = (currentFusedAngle - calibrationOffset).coerceIn(-65.0, 65.0)
+        val lean = (leanAtFixDegrees
+            ?: leanAngleAt(location.elapsedRealtimeNanos)
+            ?: (currentFusedAngle - calibrationOffset)).coerceIn(-65.0, 65.0)
         val entry = TourLogEntry(
             timestamp = gpxDateFormat.format(Date(location.time.takeIf { it > 0L } ?: timeProvider())),
             leanAngleLeft = if (lean < 0.0) abs(lean) else 0.0,

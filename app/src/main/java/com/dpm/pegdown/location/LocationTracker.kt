@@ -34,7 +34,7 @@ class LocationTracker(
         listener.onLocationUpdate(location, speedKmH)
     }
 
-    fun start() {
+    fun start(diagnosticRecording: Boolean = false) {
         // Aktualisiert bestehende Provider-Anfragen, falls sich Berechtigungen
         // seit dem letzten Start geändert haben.
         locationManager.removeUpdates(androidLocationListener)
@@ -57,8 +57,8 @@ class LocationTracker(
             ) {
                 locationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    2000L,
-                    2f,
+                    if (diagnosticRecording) 500L else 2000L,
+                    if (diagnosticRecording) 0f else 2f,
                     androidLocationListener,
                 )
             }

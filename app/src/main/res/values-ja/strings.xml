@@ -28,6 +28,10 @@
     <string name="save_tour_title">ツアーを保存</string>
     <string name="save_tour_msg">ファイル名を入力：</string>
     <string name="btn_save">保存</string>
+    <string name="sensor_diagnostics_started">この走行中、センサーとGPSの生データを端末に保存します。</string>
+    <string name="sensor_diagnostics_unavailable">センサー診断ログを開始できませんでした。</string>
+    <string name="sensor_diagnostics_saved">センサー診断を保存しました: %1$s</string>
+    <string name="sensor_diagnostics_save_failed">センサー診断を保存できませんでした: %1$s</string>
     <string name="btn_cancel">キャンセル</string>
     <string name="instructions_title">使いかた</string>
     <string name="instructions_msg">1. 最初のステップ：校正（キャリブレーション）\n- アプリを使用する前に、まず校正を行う必要があります。中央の度数表示（0.0°）をタップして、スマホの現在の向きをゼロ点（基準）として設定してください。校正完了後に数値が表示・記録されます。\n\n2. 設定とディスプレイ\n- 再校正：中央の度数表示をタップすることで、いつでもホルダーに合わせた0°の再校正が可能です。\n- 色：緑（リラックス）、黄（スポーティ）、赤（限界付近）。\n- マーカー：黄色は直前のコーナーの最大値、青色はツアー全体の最高値を表示します。\n- バッテリー節約：OLEDディスプレイに最適化されています（背景を真黒にすることで電力消費を抑えます）。\n\n3. バックグラウンド記録\n- マルチタスク：ナビアプリへの切り替えや画面オフ時でも記録を継続します。\n- 画面固定：バンク中の意図しない画面回転を防ぎます。\n\n4. 自動開始\n- 手動：⏺ 記録 をタップして開始・停止します。\n- 自動待機：⏺ 記録 を長押しします。設定速度に達すると自動で計測を開始します。\n\n5. データ出力\n- 形式：GPXまたはCSVを選択できます。\n\n安全のために：走行中は絶対にアプリを操作しないでください！</string>

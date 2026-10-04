@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.dpm.pegdown.R
+import com.dpm.pegdown.data.SensorDiagnosticsRecorder
 import com.dpm.pegdown.location.LocationTracker
 import com.dpm.pegdown.location.LocationUpdateListener
 import com.dpm.pegdown.model.TourLogEntry
@@ -30,6 +31,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
 
     private lateinit var sensorProcessor: SensorProcessor
     private lateinit var locationTracker: LocationTracker
+    private lateinit var diagnosticsRecorder: SensorDiagnosticsRecorder
 
     private var uiListener: RecordingUpdateListener? = null
 
@@ -78,6 +80,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
             context = this,
             listener = this
         )
+        diagnosticsRecorder = SensorDiagnosticsRecorder(this)
 
         createNotificationChannel()
     }
@@ -149,8 +152,26 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         recordedEntries.clear()
 
         isRecording = true
+        if (!diagnosticsRecorder.start(
+                sessionMetadata = sensorProcessor.diagnosticSessionMetadata(),
+                sensors = sensorProcessor.diagnosticSensors(),
+            )
+        ) {
+            android.widget.Toast.makeText(
+                this,
+                R.string.sensor_diagnostics_unavailable,
+                android.widget.Toast.LENGTH_LONG,
+            ).show()
+        } else {
+            android.widget.Toast.makeText(
+                this,
+                R.string.sensor_diagnostics_started,
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
 
         sensorProcessor.startRecording()
+        locationTracker.start(diagnosticRecording = true)
 
         startForeground(
             NOTIFICATION_ID,
@@ -173,6 +194,10 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         isRecording = false
 
         sensorProcessor.stopRecording()
+        diagnosticsRecorder.stop()
+        if (isTracking) {
+            locationTracker.start(diagnosticRecording = false)
+        }
 
         stopForegroundCompat()
     }
@@ -229,6 +254,24 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     // SensorUpdateListener
     // -------------------------------------------------------------------------
 
+    override fun onDiagnosticSensorSample(
+        sensor: android.hardware.Sensor,
+        timestampNanos: Long,
+        accuracy: Int,
+        values: FloatArray,
+        estimatedLeanDegrees: Double,
+        calibrated: Boolean,
+    ) {
+        diagnosticsRecorder.recordSensorSample(
+            sensor = sensor,
+            timestampNanos = timestampNanos,
+            accuracy = accuracy,
+            values = values,
+            estimatedLeanDegrees = estimatedLeanDegrees,
+            calibrated = calibrated,
+        )
+    }
+
     override fun onLeanAngleUpdate(
         current: Double,
         tempL: Double,
@@ -277,7 +320,18 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         sensorProcessor.currentLongitude = location.longitude
         sensorProcessor.currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
         sensorProcessor.currentSpeedKmH = speedKmH
-        sensorProcessor.recordLocation(location, speedKmH)
+        val callbackLeanDegrees = sensorProcessor.currentLeanAngleDegrees()
+        val leanAtFixDegrees = sensorProcessor.leanAngleAt(location.elapsedRealtimeNanos)
+        if (isRecording) {
+            diagnosticsRecorder.recordLocation(
+                location = location,
+                estimatedLeanDegrees = leanAtFixDegrees ?: callbackLeanDegrees,
+                calibrated = sensorProcessor.isCalibrated,
+                callbackLeanDegrees = callbackLeanDegrees,
+                leanAlignedToFix = leanAtFixDegrees != null,
+            )
+        }
+        sensorProcessor.recordLocation(location, speedKmH, leanAtFixDegrees)
 
         uiListener?.onLocationUpdate(
             location,
@@ -358,6 +412,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
             sensorProcessor.finishRecording()
             sensorProcessor.stopRecording()
             isRecording = false
+            diagnosticsRecorder.stop()
         }
 
         if (isTracking) {

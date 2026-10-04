@@ -28,6 +28,10 @@
     <string name="save_tour_title">Zapisz Trasę</string>
     <string name="save_tour_msg">Wpisz nazwę pliku:</string>
     <string name="btn_save">Zapisz</string>
+    <string name="sensor_diagnostics_started">Surowe dane czujników i GPS są zapisywane lokalnie podczas tej jazdy.</string>
+    <string name="sensor_diagnostics_unavailable">Nie można rozpocząć rejestrowania diagnostyki czujników.</string>
+    <string name="sensor_diagnostics_saved">Zapisano diagnostykę czujników: %1$s</string>
+    <string name="sensor_diagnostics_save_failed">Nie można zapisać diagnostyki czujników: %1$s</string>
     <string name="btn_cancel">Anuluj</string>
     <string name="instructions_title">Instrukcją</string>
     <string name="instructions_msg">1. Pierwszy Krok: Kalibracja\n- Przed użyciem aplikacja musi zostać skalibrowana. Dotknij środkowego wskaźnika stopni (0.0°), aby ustawić aktualne położenie telefonu jako punkt zerowy. Wartości będą wyświetlane i nagrywane dopiero po kalibracji.\n\n2. Ustawienia i Ekran\n- Ponowna kalibracja: Dotknij środkowego wskaźnika w dowolnym momencie, aby ponownie ustawić 0° w uchwycie.\n- Kolory: Zielony (relaks), Żółty (sport), Czerwony (limit).\n- Znaczniki: Żółty pokazuje szczyt ostatniego zakrętu, Niebieski maksimum całej trasy.\n- Oszczędzanie Baterii: Optymalizacja dla ekranów OLED (prawdziwa czerń oszczędza energię).\n\n3. Nagrywanie w Tle\n- Wielozadaniowość: Nagrywanie trwa, nawet jeśli korzystasz z nawigacji lub wygasisz ekran.\n- Blokada widoku: Zapobiega obracaniu się ekranu podczas pochylania.\n\n4. Automatyczny Start\n- Manualny: Dotknij ⏺ Nagraj, aby zacząć/skończyć.\n- Auto-Czuwanie: Przytrzymaj ⏺ Nagraj. Aplikacja rozpocznie śledzenie po osiągnięciu zadaną prędkości.\n\n5. Eksport Danych\n- Formaty: GPX lub CSV.\n\nBezpieczeństwo przede wszystkim: Nigdy nie obsługuj aplikacji podczas jazdy!</string>

@@ -28,6 +28,10 @@
     <string name="save_tour_title">Guardar Tour</string>
     <string name="save_tour_msg">Nombre del archivo:</string>
     <string name="btn_save">Guardar</string>
+    <string name="sensor_diagnostics_started">Los datos de sensores y GPS se guardan localmente con este recorrido.</string>
+    <string name="sensor_diagnostics_unavailable">No se pudo iniciar el registro de diagnóstico de sensores.</string>
+    <string name="sensor_diagnostics_saved">Diagnóstico de sensores guardado: %1$s</string>
+    <string name="sensor_diagnostics_save_failed">No se pudo guardar el diagnóstico de sensores: %1$s</string>
     <string name="btn_cancel">Cancelar</string>
     <string name="instructions_title">Instrucciones</string>
     <string name="instructions_msg">1. Primer Paso: Calibración\n- Antes de usar la app, debe ser calibrada. Toca el indicador de grados central (0.0°) para establecer la orientación actual de tu teléfono como punto cero. Los valores solo se mostrarán y registrarán tras la calibración.\n\n2. Ajustes y Pantalla\n- Recalibración: Toca el indicador central en cualquier momento para volver a calibrar 0° en tu soporte.\n- Colores: Verde (relajado), Amarillo (deportivo), Rojo (límite).\n- Marcadores: El amarillo muestra el pico de la última curva, el azul el máximo de todo el tour.\n- Ahorro de Batería: Optimizado para pantallas OLED (usa negro puro para ahorrar energía).\n\n3. Grabación en Segundo Plano\n- Multitarea: La grabación continúa aunque cambies al navegador o apagues la pantalla.\n- Fijar vista: Evita que la pantalla rote mientras te inclinas.\n\n4. Inicio Automático\n- Manual: Toca ⏺ Grabar para iniciar/detener.\n- Auto-Espera: Mantén pulsado ⏺ Grabar. Iniciará el seguimiento al alcanzar la velocidad establecida.\n\n5. Exportación de Datos\n- Formatos: Guarda como GPX o CSV.\n\nSeguridad ante todo: ¡No uses la app mientras conduces!</string>

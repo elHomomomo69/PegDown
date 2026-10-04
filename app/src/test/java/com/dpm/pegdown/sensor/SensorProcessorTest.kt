@@ -1,7 +1,6 @@
 package com.dpm.pegdown.sensor
 
 import android.content.Context
-import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
@@ -37,8 +36,6 @@ class SensorProcessorTest {
         every { Looper.getMainLooper() } returns mockk(relaxed = true)
         
         every { context.getSystemService(Context.SENSOR_SERVICE) } returns sensorManager
-        every { sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) } returns null
-        every { sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION) } returns null
         every { context.getSystemService(Context.WINDOW_SERVICE) } returns windowManager
         
         // Modern way (API 30+)
@@ -109,8 +106,6 @@ class SensorProcessorTest {
             w * other.z + x * other.y - y * other.x + z * other.w
         )
 
-        fun inverse() = TestQuaternion(w, -x, -y, -z)
-
         fun toRotationVector() = floatArrayOf(
             x.toFloat(),
             y.toFloat(),
@@ -124,22 +119,55 @@ class SensorProcessorTest {
         return TestQuaternion(kotlin.math.cos(half), kotlin.math.sin(half), 0.0, 0.0)
     }
 
+    private fun rotationY(angle: Double): TestQuaternion {
+        val half = angle / 2.0
+        return TestQuaternion(kotlin.math.cos(half), 0.0, kotlin.math.sin(half), 0.0)
+    }
+
     private fun rotationZ(angle: Double): TestQuaternion {
         val half = angle / 2.0
         return TestQuaternion(kotlin.math.cos(half), 0.0, 0.0, kotlin.math.sin(half))
     }
 
-    private fun angularRate(delta: TestQuaternion, durationSeconds: Double): FloatArray {
-        val angle = 2.0 * kotlin.math.acos(delta.w.coerceIn(-1.0, 1.0))
-        val sinHalfAngle = kotlin.math.sin(angle / 2.0)
-        if (kotlin.math.abs(sinHalfAngle) < 1e-9) return floatArrayOf(0f, 0f, 0f)
-        val radiansPerSecond = angle / durationSeconds
-        val scale = radiansPerSecond / sinHalfAngle
-        return floatArrayOf(
-            (delta.x * scale).toFloat(),
-            (delta.y * scale).toFloat(),
-            (delta.z * scale).toFloat()
-        )
+    @Test
+    fun `ten degree pitched mount tracks bike bank through yaw`() {
+        val leanUpdates = mutableListOf<Double>()
+        every {
+            listener.onLeanAngleUpdate(any(), any(), any(), any(), any())
+        } answers {
+            leanUpdates.add(firstArg())
+        }
+
+        // Device Z is pitched 10 degrees away from the motorcycle's forward axis.
+        val mountedOrientation = rotationX(Math.toRadians(80.0))
+        sensorProcessor.start()
+        repeat(15) {
+            sensorProcessor.handleRotationVector(mountedOrientation.toRotationVector())
+        }
+        sensorProcessor.calibrate()
+        repeat(30) {
+            sensorProcessor.handleRotationVector(mountedOrientation.toRotationVector())
+        }
+        assertTrue(sensorProcessor.isCalibrated)
+
+        val expectedLeanDegrees = 20.0
+        val motorcycleBank = rotationY(Math.toRadians(expectedLeanDegrees))
+        val yaw = rotationZ(Math.toRadians(135.0))
+        repeat(80) {
+            sensorProcessor.handleRotationVector(
+                (yaw * motorcycleBank * mountedOrientation).toRotationVector()
+            )
+        }
+
+        assertEquals(expectedLeanDegrees, kotlin.math.abs(leanUpdates.last()), 0.5)
+
+        // Straightening at another heading must return the reading to zero.
+        repeat(80) {
+            sensorProcessor.handleRotationVector(
+                (rotationZ(Math.toRadians(225.0)) * mountedOrientation).toRotationVector()
+            )
+        }
+        assertEquals(0.0, leanUpdates.last(), 0.2)
     }
 
     @Test
@@ -202,14 +230,7 @@ class SensorProcessorTest {
     }
 
     @Test
-    fun `gyroscope tracks lean while gravity correction is blocked by cornering acceleration`() {
-        every {
-            sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        } returns mockk(relaxed = true)
-        every {
-            sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        } returns mockk(relaxed = true)
-        val fusionProcessor = SensorProcessor(context, listener)
+    fun `motorcycle corner keeps bank angle stable through yaw and returns to zero`() {
         val leanUpdates = mutableListOf<Double>()
         every {
             listener.onLeanAngleUpdate(any(), any(), any(), any(), any())
@@ -218,149 +239,269 @@ class SensorProcessorTest {
         }
 
         val uprightMount = rotationX(Math.PI / 2.0)
-        fusionProcessor.gyroFusionAvailable = true
-        fusionProcessor.linearAccelerationAvailable = true
-        fusionProcessor.start()
+        sensorProcessor.start()
         repeat(15) {
-            fusionProcessor.handleRotationVector(uprightMount.toRotationVector())
+            sensorProcessor.handleRotationVector(uprightMount.toRotationVector())
         }
-        fusionProcessor.calibrate()
-        repeat(30) { index ->
-            fusionProcessor.handleGyroscope(floatArrayOf(0f, 0f, 0f), 1_000_000_000L + index * 20_000_000L)
-            fusionProcessor.handleRotationVector(uprightMount.toRotationVector())
+        sensorProcessor.calibrate()
+        repeat(30) {
+            sensorProcessor.handleRotationVector(uprightMount.toRotationVector())
         }
-        assertTrue(fusionProcessor.isCalibrated)
+        assertTrue(sensorProcessor.isCalibrated)
 
-        // Querbeschleunigung darf eine verfälschte Neigung aus der Rotation Vector Messung nicht übernehmen.
-        fusionProcessor.updateDynamicAcceleration(floatArrayOf(2f, 0f, 0f))
-        repeat(40) {
-            fusionProcessor.handleRotationVector(
-                (uprightMount * rotationZ(Math.toRadians(20.0))).toRotationVector()
-            )
-        }
-        assertEquals(0.0, leanUpdates.last(), 0.1)
-
-        // Das Gyroskop verfolgt die echte Rollbewegung trotz gesperrter Gravitätskorrektur.
-        val startTimestamp = 2_000_000_000L
-        val rollRate = Math.toRadians(20.0).toFloat()
-        repeat(51) { index ->
-            fusionProcessor.handleGyroscope(
-                floatArrayOf(0f, 0f, rollRate),
-                startTimestamp + index * 20_000_000L
-            )
-        }
-        assertEquals(-20.0, fusionProcessor.gyroLeanAngle, 0.3)
-
-        // Eine Drehung des Stuhls um die Welt-Hochachse darf den Winkel nicht ändern.
-        val bankedOrientation = uprightMount * rotationZ(Math.toRadians(20.0))
-        val yawedOrientation = rotationZ(Math.PI / 2.0) * bankedOrientation
-        val yawDeltaInDeviceFrame = bankedOrientation.inverse() * yawedOrientation
-        val yawRate = angularRate(yawDeltaInDeviceFrame, durationSeconds = 1.0)
-        repeat(51) { index ->
-            fusionProcessor.handleGyroscope(
-                yawRate,
-                startTimestamp + 1_020_000_000L + index * 20_000_000L
-            )
-        }
-        assertEquals(-20.0, fusionProcessor.gyroLeanAngle, 0.3)
-
-        // Nach dem Aufrichten bleibt der angezeigte Winkel nahe null.
-        val uprightAfterYaw = rotationZ(Math.PI) * uprightMount
-        val straightenDelta = yawedOrientation.inverse() * uprightAfterYaw
-        val straightenRate = angularRate(straightenDelta, durationSeconds = 1.0)
-        repeat(51) { index ->
-            fusionProcessor.handleGyroscope(
-                straightenRate,
-                startTimestamp + 2_040_000_000L + index * 20_000_000L
-            )
-        }
-        assertEquals(0.0, fusionProcessor.gyroLeanAngle, 0.6)
-
-        // Sobald die Querbeschleunigung weg ist, korrigiert die Schwerkraft verbleibenden Gyrodrift.
-        fusionProcessor.updateDynamicAcceleration(floatArrayOf(0f, 0f, 0f))
-        repeat(100) {
-            fusionProcessor.handleRotationVector(uprightMount.toRotationVector())
-        }
-        assertEquals(0.0, leanUpdates.last(), 0.1)
-    }
-
-    @Test
-    fun `motorcycle corner tracks lean while yaw and lateral acceleration change`() {
-        every {
-            sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
-        } returns mockk(relaxed = true)
-        every {
-            sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
-        } returns mockk(relaxed = true)
-        val fusionProcessor = SensorProcessor(context, listener)
-        fusionProcessor.gyroFusionAvailable = true
-        fusionProcessor.linearAccelerationAvailable = true
-
-        val uprightMount = rotationX(Math.PI / 2.0)
-        fusionProcessor.start()
-        repeat(15) {
-            fusionProcessor.handleRotationVector(uprightMount.toRotationVector())
-        }
-        fusionProcessor.calibrate()
-        repeat(30) { index ->
-            fusionProcessor.handleGyroscope(
-                floatArrayOf(0f, 0f, 0f),
-                1_000_000_000L + index * 20_000_000L
-            )
-            fusionProcessor.handleRotationVector(uprightMount.toRotationVector())
-        }
-        assertTrue(fusionProcessor.isCalibrated)
-
-        fusionProcessor.updateDynamicAcceleration(floatArrayOf(3f, 0f, 0f))
         var orientation = uprightMount
-        var timestamp = 2_000_000_000L
-        fusionProcessor.handleGyroscope(floatArrayOf(0f, 0f, 0f), timestamp)
-
-        fun followPath(steps: Int, orientationAt: (Double) -> TestQuaternion) {
+        fun sendPath(steps: Int, orientationAt: (Double) -> TestQuaternion) {
             repeat(steps) { index ->
-                val fraction = (index + 1).toDouble() / steps
-                val nextOrientation = orientationAt(fraction)
-                val bodyDelta = orientation.inverse() * nextOrientation
-                val intervalSeconds = 0.02
-                timestamp += 20_000_000L
-                fusionProcessor.handleGyroscope(
-                    angularRate(bodyDelta, intervalSeconds),
-                    timestamp
-                )
-                fusionProcessor.handleRotationVector(nextOrientation.toRotationVector())
-                orientation = nextOrientation
+                orientation = orientationAt((index + 1).toDouble() / steps)
+                sensorProcessor.handleRotationVector(orientation.toRotationVector())
             }
         }
 
         val leanDegrees = 20.0
-        followPath(50) { fraction ->
+        sendPath(50) { fraction ->
             rotationZ(Math.toRadians(90.0 * fraction)) *
                 uprightMount *
                 rotationZ(Math.toRadians(leanDegrees * fraction))
         }
-        assertEquals(-leanDegrees, fusionProcessor.gyroLeanAngle, 0.5)
+        repeat(30) {
+            sensorProcessor.handleRotationVector(orientation.toRotationVector())
+        }
+        assertEquals(-leanDegrees, leanUpdates.last(), 0.2)
 
-        // In der konstanten Schräglage weiter durch die Kurve drehen.
-        followPath(50) { fraction ->
+        // Die Fahrtrichtung ändert sich weiter, während das Motorrad konstant geneigt bleibt.
+        sendPath(50) { fraction ->
             rotationZ(Math.toRadians(90.0 + 90.0 * fraction)) *
                 uprightMount *
                 rotationZ(Math.toRadians(leanDegrees))
         }
-        assertEquals(-leanDegrees, fusionProcessor.gyroLeanAngle, 0.5)
+        repeat(30) {
+            sensorProcessor.handleRotationVector(orientation.toRotationVector())
+        }
+        assertEquals(-leanDegrees, leanUpdates.last(), 0.2)
 
-        // Beim Kurvenausgang aufrichten, während sich die Fahrtrichtung weiter ändert.
-        followPath(50) { fraction ->
+        // Beim Kurvenausgang richtet sich das Motorrad bei weiterer Yaw-Drehung auf.
+        sendPath(50) { fraction ->
             rotationZ(Math.toRadians(180.0 + 90.0 * fraction)) *
                 uprightMount *
                 rotationZ(Math.toRadians(leanDegrees * (1.0 - fraction)))
         }
-        assertEquals(0.0, fusionProcessor.gyroLeanAngle, 0.5)
-
-        fusionProcessor.updateDynamicAcceleration(floatArrayOf(0f, 0f, 0f))
-        repeat(100) {
-            fusionProcessor.handleRotationVector(orientation.toRotationVector())
+        repeat(50) {
+            sensorProcessor.handleRotationVector(orientation.toRotationVector())
         }
-        assertEquals(0.0, fusionProcessor.gyroLeanAngle, 0.2)
+        assertEquals(0.0, leanUpdates.last(), 0.2)
+    }
+
+    @Test
+    fun `device Z gyro integration worsens recorded curve and recovery`() {
+        val fixtureNames = listOf(
+            "post_turn_left_imu_before_exit_06s.csv",
+            "post_turn_left_imu_00_06.csv",
+            "post_turn_left_imu_06_12.csv",
+            "post_turn_left_imu_12_18.csv"
+        )
+        val samples = fixtureNames.flatMap { fixtureName ->
+            javaClass.getResourceAsStream(
+                "/com/dpm/pegdown/sensor/$fixtureName"
+            )!!.bufferedReader().useLines { lines ->
+                lines.drop(1).map { line ->
+                    line.split(';').map(String::toDouble)
+                }.toList()
+            }
+        }.sortedBy { it[0] }
+
+        val calibration = TestQuaternion(
+            w = 0.7269597346462376,
+            x = 0.26035285947439596,
+            y = 0.49928473185726985,
+            z = -0.3930148716025785
+        )
+        val referenceGravityX =
+            2.0 * (calibration.x * calibration.z - calibration.w * calibration.y)
+        val referenceGravityY =
+            2.0 * (calibration.y * calibration.z + calibration.w * calibration.x)
+
+        fun bankAngleFromDeviceXY(x: Double, y: Double): Double =
+            Math.toDegrees(
+                kotlin.math.atan2(
+                    referenceGravityX * y - referenceGravityY * x,
+                    referenceGravityX * x + referenceGravityY * y
+                )
+            )
+
+        fun rotationVectorBank(row: List<Double>): Double {
+            val x = row[2]
+            val y = row[3]
+            val z = row[4]
+            val w = row[5]
+            val gravityX = 2.0 * (x * z - w * y)
+            val gravityY = 2.0 * (y * z + w * x)
+            return bankAngleFromDeviceXY(gravityX, gravityY)
+        }
+
+        val rotationSamples = samples.filter { it[1].toInt() == 15 }
+        var candidateAngle = rotationVectorBank(rotationSamples.first())
+        var previousGyroscopeTime = rotationSamples.first()[0]
+        var previousAccelerometerTime = rotationSamples.first()[0]
+        val candidateByTime = mutableMapOf<Double, Double>()
+
+        // Experimental only: each physical sensor stream keeps its own timestamp.
+        // Integrate device-Z gyro rate and correct toward accelerometer tilt only
+        // when acceleration magnitude is close to gravity.
+        for (sample in samples.filter { it[0] >= rotationSamples.first()[0] }) {
+            when (sample[1].toInt()) {
+                4 -> {
+                    val dt = (sample[0] - previousGyroscopeTime).coerceAtLeast(0.0)
+                    candidateAngle -= Math.toDegrees(sample[4] * dt)
+                    previousGyroscopeTime = sample[0]
+                }
+                1 -> {
+                    val dt = (sample[0] - previousAccelerometerTime).coerceAtLeast(0.0)
+                    val x = sample[2]
+                    val y = sample[3]
+                    val z = sample[4]
+                    val magnitude = kotlin.math.sqrt(x * x + y * y + z * z)
+                    if (kotlin.math.abs(magnitude - 9.81) <= 0.8) {
+                        val accelerationAngle = bankAngleFromDeviceXY(x, y)
+                        val correction = 1.0 - kotlin.math.exp(-dt / 2.0)
+                        candidateAngle += correction * (accelerationAngle - candidateAngle)
+                    }
+                    previousAccelerometerTime = sample[0]
+                }
+                15 -> candidateByTime[sample[0]] = candidateAngle
+            }
+        }
+
+        fun meanAbsolute(
+            startSeconds: Double,
+            endSeconds: Double,
+            valueAt: (List<Double>) -> Double
+        ): Double =
+            rotationSamples
+                .filter { it[0] >= startSeconds && it[0] < endSeconds }
+                .map { kotlin.math.abs(valueAt(it)) }
+                .average()
+
+        val baselineCurve = meanAbsolute(-6.0, 0.0) { it[6] }
+        val candidateCurve = meanAbsolute(-6.0, 0.0) { candidateByTime.getValue(it[0]) }
+        val baselineEarlyRecovery = meanAbsolute(0.0, 6.0) { it[6] }
+        val candidateEarlyRecovery =
+            meanAbsolute(0.0, 6.0) { candidateByTime.getValue(it[0]) }
+        val baselineMidRecovery = meanAbsolute(6.0, 12.0) { it[6] }
+        val candidateMidRecovery =
+            meanAbsolute(6.0, 12.0) { candidateByTime.getValue(it[0]) }
+        val baselineLateRecovery = meanAbsolute(12.0, 18.0) { it[6] }
+        val candidateLateRecovery =
+            meanAbsolute(12.0, 18.0) { candidateByTime.getValue(it[0]) }
+
+        assertTrue(
+            "This naive candidate unexpectedly improved the turn: " +
+                "candidate=$candidateCurve°, baseline=$baselineCurve°",
+            candidateCurve > baselineCurve + 1.0
+        )
+        assertTrue(
+            "Expected no meaningful early recovery improvement: " +
+                "candidate=$candidateEarlyRecovery°, baseline=$baselineEarlyRecovery°",
+            candidateEarlyRecovery >= baselineEarlyRecovery
+        )
+        assertTrue(
+            "Expected increased middle recovery residual: " +
+                "candidate=$candidateMidRecovery°, baseline=$baselineMidRecovery°",
+            candidateMidRecovery > baselineMidRecovery
+        )
+        assertTrue(
+            "Expected increased late recovery residual: " +
+                "candidate=$candidateLateRecovery°, baseline=$baselineLateRecovery°",
+            candidateLateRecovery > baselineLateRecovery
+        )
+    }
+
+    @Test
+    fun `recorded left turn exit replays the logged lean response`() {
+        val replayOutput = mutableListOf<Double>()
+        every {
+            listener.onLeanAngleUpdate(any(), any(), any(), any(), any())
+        } answers {
+            replayOutput.add(firstArg())
+        }
+
+        // The fixture keeps every fourth IMU sample (~68 ms apart).
+        // Match the production EMA's 15% update at the original ~17 ms cadence.
+        sensorProcessor.smoothingAlpha = 0.47799375
+
+        val calibration = TestQuaternion(
+            w = 0.7269597346462376,
+            x = 0.26035285947439596,
+            y = 0.49928473185726985,
+            z = -0.3930148716025785
+        )
+        sensorProcessor.start()
+        repeat(15) { sensorProcessor.handleRotationVector(calibration.toRotationVector()) }
+        sensorProcessor.calibrate()
+        repeat(30) { sensorProcessor.handleRotationVector(calibration.toRotationVector()) }
+        assertTrue(sensorProcessor.isCalibrated)
+        replayOutput.clear()
+
+        val fixtureNames = listOf(
+            "post_turn_left_imu_before_exit_06s.csv",
+            "post_turn_left_imu_00_06.csv",
+            "post_turn_left_imu_06_12.csv",
+            "post_turn_left_imu_12_18.csv"
+        )
+        val samples = fixtureNames.flatMap { fixtureName ->
+            javaClass.getResourceAsStream(
+                "/com/dpm/pegdown/sensor/$fixtureName"
+            )!!.bufferedReader().useLines { lines ->
+                lines.drop(1).map { line ->
+                    line.split(';').map(String::toDouble)
+                }.toList()
+            }
+        }.sortedBy { it[0] }
+
+        val samplesByType = samples.groupBy { it[1].toInt() }
+        assertEquals(mapOf(1 to 352, 4 to 352, 15 to 352), samplesByType.mapValues { it.value.size })
+        samplesByType.forEach { (type, typedSamples) ->
+            val timestamps = typedSamples.map { it[0] }
+            assertTrue(
+                "Sensor $type samples must be ordered and have no gap over 150 ms",
+                timestamps.zipWithNext().all { (before, after) ->
+                    after > before && after - before <= 0.15
+                }
+            )
+        }
+
+        val rotationSamples = samples.filter { it[1].toInt() == 15 }
+        rotationSamples.forEach { row ->
+            sensorProcessor.handleRotationVector(
+                floatArrayOf(
+                    row[2].toFloat(),
+                    row[3].toFloat(),
+                    row[4].toFloat(),
+                    row[5].toFloat()
+                )
+            )
+        }
+
+        assertEquals(rotationSamples.size, replayOutput.size)
+        val comparable = rotationSamples.indices.filter { rotationSamples[it][0] >= 2.0 }
+        val maxReplayError = comparable.maxOf { index ->
+            kotlin.math.abs(replayOutput[index] - rotationSamples[index][6])
+        }
+        assertTrue(
+            "Replay must track the recorded app output; max error=$maxReplayError°",
+            maxReplayError <= 2.0
+        )
+
+        // Characterize the measured post-turn residual for future algorithm comparisons.
+        val earlyMean = rotationSamples.indices
+            .filter { rotationSamples[it][0] in 2.0..6.0 }
+            .map { replayOutput[it] }
+            .average()
+        val laterMean = rotationSamples.indices
+            .filter { rotationSamples[it][0] in 6.0..10.0 }
+            .map { replayOutput[it] }
+            .average()
+        assertTrue("Expected a measurable opposite-side residual: $earlyMean°", earlyMean > 3.0)
+        assertTrue("Expected the residual to decay over time: $laterMean°", laterMean < earlyMean)
     }
 
     @Test

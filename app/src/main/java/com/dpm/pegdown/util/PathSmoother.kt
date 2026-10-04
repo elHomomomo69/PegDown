@@ -13,26 +13,33 @@ object PathSmoother {
         toleranceMeters: Double = 5.0,
         maxGapMillis: Long = 15_000L
     ): List<TourLogEntry> {
-        if (points.size < 3) return points
+        val orderedPoints = points.withIndex()
+            .sortedWith(
+                compareBy<IndexedValue<TourLogEntry>> {
+                    TourTimestamp.parseMillis(it.value.timestamp) ?: Long.MAX_VALUE
+                }.thenBy { it.index }
+            )
+            .map { it.value }
+        if (orderedPoints.size < 3) return orderedPoints
 
         val anchors = mutableListOf(0)
-        for (index in 1 until points.lastIndex) {
-            val point = points[index]
-            val previous = points[index - 1]
+        for (index in 1 until orderedPoints.lastIndex) {
+            val point = orderedPoints[index]
+            val previous = orderedPoints[index - 1]
             if (hasRelevantMeasurement(point) ||
                 timestampMillis(point) - timestampMillis(previous) > maxGapMillis
             ) {
                 anchors.add(index)
             }
         }
-        anchors.add(points.lastIndex)
+        anchors.add(orderedPoints.lastIndex)
 
-        val keep = BooleanArray(points.size)
+        val keep = BooleanArray(orderedPoints.size)
         anchors.forEach { keep[it] = true }
 
         for (anchorIndex in 0 until anchors.lastIndex) {
             simplifyRange(
-                points = points,
+                points = orderedPoints,
                 start = anchors[anchorIndex],
                 end = anchors[anchorIndex + 1],
                 toleranceMeters = toleranceMeters,
@@ -40,7 +47,7 @@ object PathSmoother {
             )
         }
 
-        return points.filterIndexed { index, _ -> keep[index] }
+        return orderedPoints.filterIndexed { index, _ -> keep[index] }
     }
 
     private fun hasRelevantMeasurement(point: TourLogEntry): Boolean =
@@ -108,10 +115,7 @@ object PathSmoother {
     }
 
     private fun timestampMillis(point: TourLogEntry): Long =
-        runCatching {
-            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
-                .parse(point.timestamp)?.time ?: 0L
-        }.getOrDefault(0L)
+        TourTimestamp.parseMillis(point.timestamp) ?: 0L
 
     /**
      * Legacy Douglas-Peucker helper retained for existing callers and tests.
