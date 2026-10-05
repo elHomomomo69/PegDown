@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">Manual</string>
     <string name="mode_auto">Auto-Espera</string>
+    <string name="setting_experimental_lean">Medición experimental de inclinación</string>
+    <string name="desc_experimental_lean">Prueba en vivo del nuevo cálculo de sensores/GPS. Activa antes de grabar y vuelve a calibrar. Requiere giroscopio y acelerómetro. Se guardan ambos ángulos; la precisión aún no está validada.</string>
+    <string name="status_experimental_lean">Experimento: sensores/GPS</string>
+    <string name="status_experimental_waiting">Experimento: recalibrar / esperando sensores</string>
 </resources>

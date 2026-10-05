@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">手動</string>
     <string name="mode_auto">自動待機</string>
+    <string name="setting_experimental_lean">実験的なバンク角測定</string>
+    <string name="desc_experimental_lean">新しいセンサー・GPS計算のライブテストです。記録前に有効にして再校正してください。ジャイロと加速度センサーが必要です。両方の角度を記録します。精度は未検証です。</string>
+    <string name="status_experimental_lean">実験：センサー・GPS</string>
+    <string name="status_experimental_waiting">実験：再校正・センサー待機中</string>
 </resources>

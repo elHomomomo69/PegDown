@@ -1099,6 +1099,12 @@ class MainActivity : AppCompatActivity(),
                 )
             }
         }
+        if (service.isExperimentalLeanEnabled()) {
+            tvStatus.append("\n" + getString(
+                if (service.isExperimentalLeanReady()) R.string.status_experimental_lean
+                else R.string.status_experimental_waiting
+            ))
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1114,7 +1120,8 @@ class MainActivity : AppCompatActivity(),
 
             service.updateSettings(
                 settingsManager.resetDurationSeconds * 1000L,
-                settingsManager.smoothingFactor.toDouble()
+                settingsManager.smoothingFactor.toDouble(),
+                settingsManager.isExperimentalLeanEnabled,
             )
 
             /*

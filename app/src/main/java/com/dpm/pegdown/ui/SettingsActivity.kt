@@ -119,6 +119,21 @@ class SettingsActivity : Activity() {
             setPadding(0, 20, 0, 40)
         })
 
+        val experimentalContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 20, 0, 10)
+        }
+        experimentalContainer.addView(createLabel(getString(R.string.setting_experimental_lean)).apply {
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        experimentalContainer.addView(Switch(this).apply {
+            isChecked = settingsManager.isExperimentalLeanEnabled
+            setOnCheckedChangeListener { _, checked -> settingsManager.isExperimentalLeanEnabled = checked }
+        })
+        container.addView(experimentalContainer)
+        container.addView(createDesc(getString(R.string.desc_experimental_lean)))
+
         // 4. Default Recording Mode
         container.addView(createLabel(getString(R.string.setting_default_mode)))
         container.addView(createDesc(getString(R.string.desc_default_mode)))

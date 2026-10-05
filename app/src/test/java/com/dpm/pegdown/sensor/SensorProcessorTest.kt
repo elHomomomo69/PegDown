@@ -52,6 +52,82 @@ class SensorProcessorTest {
         unmockkConstructor(Handler::class)
     }
 
+    private fun calibrateExperimental() {
+        sensorProcessor.setExperimentalLeanEnabled(true)
+        val mounted = floatArrayOf(
+            kotlin.math.sin(Math.toRadians(40.0)).toFloat(), 0f, 0f,
+            kotlin.math.cos(Math.toRadians(40.0)).toFloat(),
+        )
+        sensorProcessor.start()
+        repeat(15) { sensorProcessor.handleRotationVector(mounted) }
+        sensorProcessor.calibrate()
+        repeat(30) { sensorProcessor.handleRotationVector(mounted) }
+        assertTrue(sensorProcessor.isCalibrated)
+        assertFalse(sensorProcessor.isExperimentalReady)
+    }
+
+    @Test
+    fun `experimental mode defaults off and switching requires a fresh calibration`() {
+        assertFalse(sensorProcessor.experimentalLeanEnabled)
+        sensorProcessor.setExperimentalLeanEnabled(true)
+        assertTrue(sensorProcessor.experimentalLeanEnabled)
+        assertFalse(sensorProcessor.isCalibrated)
+        assertEquals(null, sensorProcessor.experimentalLeanAngleDegrees())
+    }
+
+    @Test
+    fun `experimental live gyro supplies gauge and timestamp history while standard remains available`() {
+        calibrateExperimental()
+        val up = ImuQuaternion.axisAngle(ImuVector(1.0, 0.0, 0.0), Math.toRadians(80.0))
+            .inverse().rotate(ImuVector.UP)
+        val forward = CompensatedImuLeanExperiment.assumedForwardFromScreen(up)
+        val gyro = floatArrayOf((forward.x * 0.1).toFloat(), (forward.y * 0.1).toFloat(), (forward.z * 0.1).toFloat())
+        for (i in 0..100) sensorProcessor.handleExperimentalGyroscope(1_000_000_000L + i * 20_000_000L, gyro)
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertEquals(0.0, sensorProcessor.standardLeanAngleDegrees(), 1e-6)
+        assertTrue(sensorProcessor.currentLeanAngleDegrees() > 8.0)
+        assertEquals(sensorProcessor.experimentalLeanAngleDegrees()!!, sensorProcessor.currentLeanAngleDegrees(), 0.0)
+        assertEquals(sensorProcessor.currentLeanAngleDegrees(), sensorProcessor.leanAngleAt(3_000_000_000L)!!, 1e-9)
+        sensorProcessor.isRecording = true
+        sensorProcessor.setExperimentalLeanEnabled(false)
+        assertTrue(sensorProcessor.experimentalLeanEnabled)
+        sensorProcessor.isRecording = false
+        sensorProcessor.setExperimentalLeanEnabled(false)
+        assertFalse(sensorProcessor.isCalibrated)
+        assertEquals(null, sensorProcessor.leanAngleAt(3_000_000_000L))
+    }
+
+    @Test
+    fun `experimental gyro gap invalidates estimate and requires recalibration`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(1_000_000_000L, floatArrayOf(0f, 0f, 0f))
+        sensorProcessor.handleExperimentalGyroscope(1_020_000_000L, floatArrayOf(0f, 0f, 0f))
+        assertTrue(sensorProcessor.isExperimentalReady)
+        sensorProcessor.handleExperimentalGyroscope(2_000_000_000L, floatArrayOf(0f, 0f, 0f))
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertEquals("GYRO_GAP_RECALIBRATE", sensorProcessor.experimentalDiagnosticStatus())
+        assertEquals(null, sensorProcessor.leanAngleAt(1_020_000_000L))
+        sensorProcessor.handleExperimentalGyroscope(2_020_000_000L, floatArrayOf(0f, 0f, 0f))
+        assertFalse(sensorProcessor.isExperimentalReady)
+    }
+
+    @Test
+    fun `calibration during recording emits reference metadata for replay`() {
+        sensorProcessor.isRecording = true
+        calibrateExperimental()
+        // Changing modes is deliberately blocked during recording.
+        sensorProcessor.isRecording = false
+        calibrateExperimental()
+        sensorProcessor.isRecording = true
+        sensorProcessor.calibrate()
+        val mounted = floatArrayOf(kotlin.math.sin(Math.toRadians(40.0)).toFloat(), 0f, 0f,
+            kotlin.math.cos(Math.toRadians(40.0)).toFloat())
+        repeat(30) { sensorProcessor.handleRotationVector(mounted) }
+        io.mockk.verify { listener.onDiagnosticCalibration(match {
+            it.contains("lean_mode=experimental_full_interval") && it.contains("calibration_gravity_xyz=")
+        }) }
+    }
+
     @Test
     fun `calibration averages rotation samples and treats reference as zero`() {
         val leanUpdates = mutableListOf<Double>()

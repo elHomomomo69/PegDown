@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">Manualny</string>
     <string name="mode_auto">Auto-Czuwanie</string>
+    <string name="setting_experimental_lean">Eksperymentalny pomiar przechyłu</string>
+    <string name="desc_experimental_lean">Test nowego obliczania z czujników/GPS. Włącz przed nagrywaniem i ponownie skalibruj. Wymaga żyroskopu i akcelerometru. Oba kąty są zapisywane; dokładność nie została jeszcze potwierdzona.</string>
+    <string name="status_experimental_lean">Eksperyment: czujniki/GPS</string>
+    <string name="status_experimental_waiting">Eksperyment: skalibruj / oczekiwanie na czujniki</string>
 </resources>

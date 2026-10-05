@@ -19,7 +19,12 @@ class SettingsManager(context: Context) {
         const val KEY_INVERT_AXIS = "invert_axis"
         const val KEY_LANGUAGE = "selected_language"
         const val KEY_EXPORT_FORMAT = "export_format"
+        const val KEY_EXPERIMENTAL_LEAN = "experimental_lean"
     }
+
+    var isExperimentalLeanEnabled: Boolean
+        get() = prefs.getBoolean(KEY_EXPERIMENTAL_LEAN, false)
+        set(value) = prefs.edit { putBoolean(KEY_EXPERIMENTAL_LEAN, value) }
 
     var exportFormat: ExportFormat
         get() {

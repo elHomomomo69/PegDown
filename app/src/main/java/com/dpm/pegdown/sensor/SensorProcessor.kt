@@ -16,6 +16,8 @@ import java.util.TimeZone
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.pow
 import kotlin.math.round
 import kotlin.math.sin
@@ -104,6 +106,43 @@ class SensorProcessor(
     private var rawLeanAngle = 0.0
 
     private var currentFusedAngle = 0.0
+
+    var experimentalLeanEnabled = false
+        private set
+    private var experimentalEstimator: CompensatedImuLeanExperiment? = null
+    private var experimentalDisplay: Double? = null
+    private var experimentalGyroTime = 0L
+    private var experimentalNeedsSeed = false
+    private var latestRotationTimestamp = 0L
+    private var experimentalFailure: String? = null
+
+    val isExperimentalReady: Boolean
+        get() = experimentalEstimator != null && experimentalDisplay != null
+    fun standardLeanAngleDegrees(): Double = currentFusedAngle - calibrationOffset
+    fun experimentalLeanAngleDegrees(): Double? = experimentalDisplay
+    fun experimentalDiagnosticStatus(): String = when {
+        !experimentalLeanEnabled -> "DISABLED"
+        experimentalFailure != null -> experimentalFailure!!
+        !isExperimentalReady -> "WAITING_FOR_CALIBRATION_OR_GYRO"
+        else -> experimentalEstimator?.lastDecision?.reason?.name ?: "GYRO_ONLY"
+    }
+
+    fun setExperimentalLeanEnabled(enabled: Boolean) {
+        if (enabled == experimentalLeanEnabled || isRecording) return
+        experimentalLeanEnabled = enabled
+        experimentalEstimator = null
+        experimentalDisplay = null
+        experimentalFailure = null
+        experimentalNeedsSeed = false
+        calibrationQuaternion = null
+        calibrationGravity = null
+        calibrationInProgress = false
+        calibrationQuaternions.clear()
+        calibrationProgress = 0.0
+        currentFusedAngle = 0.0
+        synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
+        resetTour()
+    }
 
     private data class LeanTimestampSample(
         val timestampNanos: Long,
@@ -239,7 +278,8 @@ class SensorProcessor(
     var currentAltitude = 0.0
     var currentSpeedKmH = 0.0
 
-    fun currentLeanAngleDegrees(): Double = currentFusedAngle - calibrationOffset
+    fun currentLeanAngleDegrees(): Double =
+        if (experimentalLeanEnabled) experimentalDisplay ?: 0.0 else standardLeanAngleDegrees()
 
     /** Returns the lean estimate aligned to a location fix's monotonic timestamp. */
     fun leanAngleAt(timestampNanos: Long): Double? {
@@ -292,6 +332,13 @@ class SensorProcessor(
     fun start() {
 
         sensorStartupCounter = 0
+        experimentalEstimator = null
+        experimentalDisplay = null
+        experimentalFailure = null
+        experimentalNeedsSeed = experimentalLeanEnabled && isCalibrated
+        experimentalGyroTime = 0L
+        latestRotationTimestamp = 0L
+        synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
 
         currentQuaternion = null
         relativeQuaternion = null
@@ -363,6 +410,11 @@ class SensorProcessor(
         }
 
         calibrationQuaternions.clear()
+        experimentalEstimator = null
+        experimentalDisplay = null
+        experimentalFailure = null
+        experimentalNeedsSeed = false
+        synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
 
         calibrationAccelX = 0.0
         calibrationAccelY = 0.0
@@ -446,8 +498,15 @@ class SensorProcessor(
 
         calibrationQuaternion = averaged
         calibrationGravity = gravityInDeviceFrame(averaged)
+        experimentalEstimator = null
+        experimentalDisplay = null
+        experimentalFailure = null
+        experimentalNeedsSeed = experimentalLeanEnabled
+        experimentalGyroTime = 0L
+        synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
         /*
-         * Die Schwerkraftrichtung und das Gyroskop sind jetzt kalibriert.
+         * Die aufrechte Schwerkraftreferenz ist jetzt gesetzt.
+         * Ein Gyro-Bias wird hier nicht geschätzt.
          */
         calibrationOffset = 0.0
 
@@ -472,6 +531,7 @@ class SensorProcessor(
 
         calibrationInProgress = false
         calibrationProgress = 1.0
+        if (isRecording) listener.onDiagnosticCalibration(diagnosticSessionMetadata())
 
         calibrationQuaternions.clear()
 
@@ -556,13 +616,16 @@ class SensorProcessor(
         when (event.sensor.type) {
 
             Sensor.TYPE_GAME_ROTATION_VECTOR -> {
+                latestRotationTimestamp = event.timestamp
                 handleRotationVector(event.values)
-                recordLeanTimestampSample(event.timestamp)
+                if (!experimentalLeanEnabled) recordLeanTimestampSample(event.timestamp)
             }
 
             Sensor.TYPE_LINEAR_ACCELERATION -> {
                 handleLinearAcceleration(event)
             }
+            Sensor.TYPE_GYROSCOPE -> handleExperimentalGyroscope(event.timestamp, event.values)
+            Sensor.TYPE_ACCELEROMETER -> handleExperimentalAccelerometer(event.timestamp, event.values)
 
         }
 
@@ -572,8 +635,8 @@ class SensorProcessor(
                 timestampNanos = event.timestamp,
                 accuracy = event.accuracy,
                 values = event.values.copyOf(),
-                estimatedLeanDegrees = currentFusedAngle - calibrationOffset,
-                calibrated = isCalibrated,
+                estimatedLeanDegrees = currentLeanAngleDegrees(),
+                calibrated = isCalibrated && (!experimentalLeanEnabled || isExperimentalReady),
             )
         }
     }
@@ -582,8 +645,8 @@ class SensorProcessor(
         if (timestampNanos <= 0L) return
         val sample = LeanTimestampSample(
             timestampNanos = timestampNanos,
-            leanDegrees = (currentFusedAngle - calibrationOffset).coerceIn(-65.0, 65.0),
-            calibrated = isCalibrated,
+            leanDegrees = currentLeanAngleDegrees().coerceIn(-65.0, 65.0),
+            calibrated = isCalibrated && (!experimentalLeanEnabled || isExperimentalReady),
         )
         synchronized(leanTimestampSamplesLock) {
             if (leanTimestampSamples.lastOrNull()?.timestampNanos?.let { timestampNanos <= it } == true) return
@@ -595,6 +658,76 @@ class SensorProcessor(
                 leanTimestampSamples.removeFirst()
             }
         }
+    }
+
+    internal fun handleExperimentalAccelerometer(timestampNanos: Long, values: FloatArray) {
+        if (!experimentalLeanEnabled || values.size < 3) return
+        experimentalEstimator?.onAccelerometer(timestampNanos, ImuVector(
+            values[0].toDouble(), values[1].toDouble(), values[2].toDouble(),
+        ))
+    }
+
+    internal fun handleExperimentalGyroscope(timestampNanos: Long, values: FloatArray) {
+        if (!experimentalLeanEnabled || calibrationInProgress || !isCalibrated ||
+            values.size < 3 || timestampNanos <= 0L) return
+        val rate = ImuVector(values[0].toDouble(), values[1].toDouble(), values[2].toDouble())
+        if (!rate.finite()) return
+        if (experimentalEstimator == null && experimentalNeedsSeed) {
+            val q = currentQuaternion ?: return
+            if (!listOf(q.w, q.x, q.y, q.z).all { it.isFinite() }) return
+            val gravity = calibrationGravity ?: return
+            val up = ImuVector(gravity.x, gravity.y, gravity.z).unit()
+            val forward = runCatching { CompensatedImuLeanExperiment.assumedForwardFromScreen(up) }
+                .getOrNull() ?: return
+            if (latestRotationTimestamp > 0L && abs(timestampNanos - latestRotationTimestamp) > 150_000_000L) return
+            experimentalEstimator = CompensatedImuLeanExperiment(
+                up, forward, ImuQuaternion(q.w, q.x, q.y, q.z), timestampNanos,
+                matchGpsInterval = true,
+            )
+            experimentalDisplay = experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
+            experimentalGyroTime = timestampNanos
+            experimentalNeedsSeed = false
+        } else {
+            val estimator = experimentalEstimator ?: return
+            if (timestampNanos <= experimentalGyroTime) return
+            estimator.onGyroscope(timestampNanos, rate)
+            if (estimator.gyroGaps > 0) {
+                // Do not present a stale integrated attitude after a sensor gap.
+                experimentalEstimator = null
+                experimentalDisplay = null
+                experimentalFailure = "GYRO_GAP_RECALIBRATE"
+                synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
+                notifyUpdates()
+                return
+            }
+            val dt = (timestampNanos - experimentalGyroTime) / 1e9
+            experimentalGyroTime = timestampNanos
+            val tau = -1.0 / (59.0 * ln(1.0 - smoothingAlpha.coerceIn(0.01, 0.50)))
+            val alpha = 1.0 - exp(-dt / tau)
+            val raw = estimator.chassisBankDegrees
+            val target = (if (abs(raw) < 0.20) 0.0 else raw).coerceIn(-65.0, 65.0)
+            experimentalDisplay = experimentalDisplay!! + alpha * (target - experimentalDisplay!!)
+        }
+        recordLeanTimestampSample(timestampNanos)
+        processLeanAngle()
+    }
+
+    fun handleExperimentalLocation(location: android.location.Location) {
+        val estimator = experimentalEstimator ?: return
+        if (!experimentalLeanEnabled) return
+        estimator.onFix(CompensatedImuLeanExperiment.Fix(
+            timestampNanos = location.elapsedRealtimeNanos,
+            arrivalNanos = android.os.SystemClock.elapsedRealtimeNanos(),
+            speedMps = location.speed.toDouble(),
+            bearingDegrees = location.bearing.toDouble(),
+            bearingAccuracyDegrees = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasBearingAccuracy())
+                location.bearingAccuracyDegrees.toDouble() else Double.NaN,
+            speedAccuracyMps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasSpeedAccuracy())
+                location.speedAccuracyMetersPerSecond.toDouble() else Double.NaN,
+            positionAccuracyMetres = if (location.hasAccuracy()) location.accuracy.toDouble() else Double.NaN,
+            hasSpeed = location.hasSpeed(), hasBearing = location.hasBearing(),
+            provider = location.provider.orEmpty(),
+        ))
     }
 
     fun diagnosticSensors(): List<Sensor> =
@@ -621,6 +754,11 @@ class SensorProcessor(
                 listOf(it.x, it.y, it.z).joinToString(";")
             }.orEmpty(),
             "display_smoothing_alpha=" + smoothingAlpha,
+            "lean_mode=" + if (experimentalLeanEnabled) "experimental_full_interval" else "android_standard",
+            "experimental_course_lag_seconds=0",
+            "experimental_course_gyro_gate=false",
+            "experimental_gyro_bias_xyz=0;0;0",
+            "experimental_mount_yaw_degrees=0",
             "mount_axis_assumption=device_z_along_motorcycle_forward",
             "imu_sampling_hint_us=20000",
             "gps_interval_diagnostic_ms=500",
@@ -719,7 +857,7 @@ class SensorProcessor(
         val limitedAngle = targetAngle.coerceIn(-65.0, 65.0)
         val alpha = smoothingAlpha.coerceIn(0.01, 0.50)
         currentFusedAngle += alpha * (limitedAngle - currentFusedAngle)
-        processLeanAngle()
+        if (!experimentalLeanEnabled) processLeanAngle()
     }
 
     // ========================================================================
@@ -1040,9 +1178,7 @@ class SensorProcessor(
 
     private fun processLeanAngle() {
 
-        val calculatedAngle =
-            currentFusedAngle -
-                    calibrationOffset
+        val calculatedAngle = currentLeanAngleDegrees()
 
         val finalAngle =
             round(
@@ -1226,9 +1362,7 @@ class SensorProcessor(
 
     private fun notifyUpdates() {
 
-        val calculatedAngle =
-            currentFusedAngle -
-                    calibrationOffset
+        val calculatedAngle = currentLeanAngleDegrees()
 
         val finalAngle =
             round(
@@ -1385,7 +1519,7 @@ class SensorProcessor(
 
         val lean = (leanAtFixDegrees
             ?: leanAngleAt(location.elapsedRealtimeNanos)
-            ?: (currentFusedAngle - calibrationOffset)).coerceIn(-65.0, 65.0)
+            ?: currentLeanAngleDegrees()).coerceIn(-65.0, 65.0)
         val entry = TourLogEntry(
             timestamp = gpxDateFormat.format(Date(location.time.takeIf { it > 0L } ?: timeProvider())),
             leanAngleLeft = if (lean < 0.0) abs(lean) else 0.0,

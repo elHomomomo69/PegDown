@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">Manuel</string>
     <string name="mode_auto">Auto-Prêt</string>
+    <string name="setting_experimental_lean">Mesure expérimentale de l’inclinaison</string>
+    <string name="desc_experimental_lean">Essai en direct du nouveau calcul capteurs/GPS. Activer avant l’enregistrement et recalibrer. Nécessite un gyroscope et un accéléromètre. Les deux angles sont enregistrés ; la précision reste à valider.</string>
+    <string name="status_experimental_lean">Expérience : capteurs/GPS</string>
+    <string name="status_experimental_waiting">Expérience : recalibrer / attente des capteurs</string>
 </resources>

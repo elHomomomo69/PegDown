@@ -29,6 +29,14 @@ class SettingsManagerTest {
     }
 
     @Test
+    fun `experimental lean is opt in and persists the choice`() {
+        every { sharedPrefs.getBoolean(SettingsManager.KEY_EXPERIMENTAL_LEAN, false) } returns false
+        assertEquals(false, settingsManager.isExperimentalLeanEnabled)
+        settingsManager.isExperimentalLeanEnabled = true
+        verify { editor.putBoolean(SettingsManager.KEY_EXPERIMENTAL_LEAN, true) }
+    }
+
+    @Test
     fun `lockedOrientation stores value correctly`() {
         settingsManager.lockedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
         

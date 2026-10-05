@@ -66,4 +66,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">Manual</string>
     <string name="mode_auto">Auto-Idle</string>
+    <string name="setting_experimental_lean">Experimental lean measurement</string>
+    <string name="desc_experimental_lean">Live test of the new sensor/GPS calculation. Enable before recording and recalibrate. Requires gyroscope and accelerometer. Standard and experimental angles are logged together; accuracy is not yet validated.</string>
+    <string name="status_experimental_lean">Experiment: sensor/GPS</string>
+    <string name="status_experimental_waiting">Experiment: recalibrate / waiting for sensors</string>
 </resources>

@@ -211,8 +211,11 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
     }
 
     fun isCalibrated(): Boolean {
-        return sensorProcessor.isCalibrated
+        return sensorProcessor.isCalibrated && (!sensorProcessor.experimentalLeanEnabled || sensorProcessor.isExperimentalReady)
     }
+
+    fun isExperimentalLeanEnabled(): Boolean = sensorProcessor.experimentalLeanEnabled
+    fun isExperimentalLeanReady(): Boolean = sensorProcessor.isExperimentalReady
 
     fun hasSensorData(): Boolean {
         return sensorProcessor.hasSensorData
@@ -244,15 +247,21 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
 
     fun updateSettings(
         resetMillis: Long,
-        smoothing: Double
+        smoothing: Double,
+        experimentalLean: Boolean = false,
     ) {
         sensorProcessor.resetDurationMillis = resetMillis
         sensorProcessor.smoothingAlpha = smoothing
+        if (!isRecording) sensorProcessor.setExperimentalLeanEnabled(experimentalLean)
     }
 
     // -------------------------------------------------------------------------
     // SensorUpdateListener
     // -------------------------------------------------------------------------
+
+    override fun onDiagnosticCalibration(metadata: String) {
+        diagnosticsRecorder.recordCalibration(metadata)
+    }
 
     override fun onDiagnosticSensorSample(
         sensor: android.hardware.Sensor,
@@ -269,6 +278,10 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
             values = values,
             estimatedLeanDegrees = estimatedLeanDegrees,
             calibrated = calibrated,
+            standardLeanDegrees = sensorProcessor.standardLeanAngleDegrees(),
+            experimentalLeanDegrees = sensorProcessor.experimentalLeanAngleDegrees(),
+            leanMode = if (sensorProcessor.experimentalLeanEnabled) "experimental_full_interval" else "android_standard",
+            experimentalStatus = sensorProcessor.experimentalDiagnosticStatus(),
         )
     }
 
@@ -320,15 +333,20 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         sensorProcessor.currentLongitude = location.longitude
         sensorProcessor.currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
         sensorProcessor.currentSpeedKmH = speedKmH
+        sensorProcessor.handleExperimentalLocation(location)
         val callbackLeanDegrees = sensorProcessor.currentLeanAngleDegrees()
         val leanAtFixDegrees = sensorProcessor.leanAngleAt(location.elapsedRealtimeNanos)
         if (isRecording) {
             diagnosticsRecorder.recordLocation(
                 location = location,
                 estimatedLeanDegrees = leanAtFixDegrees ?: callbackLeanDegrees,
-                calibrated = sensorProcessor.isCalibrated,
+                calibrated = isCalibrated(),
                 callbackLeanDegrees = callbackLeanDegrees,
                 leanAlignedToFix = leanAtFixDegrees != null,
+                standardLeanDegrees = sensorProcessor.standardLeanAngleDegrees(),
+                experimentalLeanDegrees = sensorProcessor.experimentalLeanAngleDegrees(),
+                leanMode = if (sensorProcessor.experimentalLeanEnabled) "experimental_full_interval" else "android_standard",
+                experimentalStatus = sensorProcessor.experimentalDiagnosticStatus(),
             )
         }
         sensorProcessor.recordLocation(location, speedKmH, leanAtFixDegrees)

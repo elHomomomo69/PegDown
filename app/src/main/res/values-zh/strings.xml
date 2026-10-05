@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">手动</string>
     <string name="mode_auto">自动待机</string>
+    <string name="setting_experimental_lean">实验性倾角测量</string>
+    <string name="desc_experimental_lean">实时测试新的传感器/GPS计算。请在记录前启用并重新校准。需要陀螺仪和加速度计。两个角度都会记录，精度尚未验证。</string>
+    <string name="status_experimental_lean">实验：传感器/GPS</string>
+    <string name="status_experimental_waiting">实验：重新校准／等待传感器</string>
 </resources>

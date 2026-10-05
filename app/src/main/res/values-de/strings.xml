@@ -63,4 +63,8 @@
     <string name="lang_ja">日本語</string>
     <string name="mode_manual">Manuell</string>
     <string name="mode_auto">Auto-Bereit</string>
+    <string name="setting_experimental_lean">Experimentelle Schräglagenmessung</string>
+    <string name="desc_experimental_lean">Live-Test der neuen Sensor-/GPS-Berechnung. Vor der Aufnahme aktivieren und neu kalibrieren. Benötigt Gyroskop und Beschleunigungssensor. Beide Winkel werden protokolliert; die Genauigkeit ist noch nicht bestätigt.</string>
+    <string name="status_experimental_lean">Experiment: Sensor/GPS</string>
+    <string name="status_experimental_waiting">Experiment: neu kalibrieren / warte auf Sensoren</string>
 </resources>

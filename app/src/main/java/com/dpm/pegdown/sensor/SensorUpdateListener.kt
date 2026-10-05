@@ -8,6 +8,8 @@ interface SensorUpdateListener {
     fun onAccelerationUpdate(accel: Double, brake: Double, tourMaxAccel: Double, tourMaxBrake: Double)
     fun onPeakRecorded(entry: TourLogEntry)
 
+    fun onDiagnosticCalibration(metadata: String) = Unit
+
     fun onDiagnosticSensorSample(
         sensor: Sensor,
         timestampNanos: Long,
