@@ -265,7 +265,7 @@ class SensorProcessor(
     private var smoothedAccel = 0.0
     private var smoothedBrake = 0.0
 
-    private val accelSmoothingAlpha = 0.15
+    private val forwardAccelerationProcessor = ForwardAccelerationProcessor()
 
     // ========================================================================
     // EXTERNAL STATE
@@ -332,6 +332,9 @@ class SensorProcessor(
     fun start() {
 
         sensorStartupCounter = 0
+        forwardAccelerationProcessor.reset()
+        smoothedAccel = 0.0
+        smoothedBrake = 0.0
         experimentalEstimator = null
         experimentalDisplay = null
         experimentalFailure = null
@@ -526,6 +529,7 @@ class SensorProcessor(
 
         smoothedAccel = 0.0
         smoothedBrake = 0.0
+        forwardAccelerationProcessor.reset()
 
         cancelPeakTimer()
 
@@ -579,6 +583,7 @@ class SensorProcessor(
          */
         smoothedAccel = 0.0
         smoothedBrake = 0.0
+        forwardAccelerationProcessor.reset()
 
         /*
          * Gemeinsames Peak-Fenster abbrechen.
@@ -683,6 +688,7 @@ class SensorProcessor(
             experimentalEstimator = CompensatedImuLeanExperiment(
                 up, forward, ImuQuaternion(q.w, q.x, q.y, q.z), timestampNanos,
                 matchGpsInterval = true,
+                allowSlowCourseCorrections = true,
             )
             experimentalDisplay = experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
             experimentalGyroTime = timestampNanos
@@ -754,9 +760,18 @@ class SensorProcessor(
                 listOf(it.x, it.y, it.z).joinToString(";")
             }.orEmpty(),
             "display_smoothing_alpha=" + smoothingAlpha,
+            "acceleration_axis=calibrated_horizontal_screen_minus_z",
+            "acceleration_filter=signed_ema_before_split",
+            "acceleration_filter_tau_seconds=0.35",
+            "acceleration_deadband_g=0.05",
             "lean_mode=" + if (experimentalLeanEnabled) "experimental_full_interval" else "android_standard",
             "experimental_course_lag_seconds=0",
             "experimental_course_gyro_gate=false",
+            "experimental_slow_course_corrections=true",
+            "experimental_slow_min_speed_mps=3",
+            "experimental_slow_max_course_accuracy_degrees=2",
+            "experimental_slow_max_lateral_sigma_mps2=0.5",
+            "experimental_slow_course_gyro_gate=true",
             "experimental_gyro_bias_xyz=0;0;0",
             "experimental_mount_yaw_degrees=0",
             "mount_axis_assumption=device_z_along_motorcycle_forward",
@@ -910,21 +925,6 @@ class SensorProcessor(
     }
 
     // ========================================================================
-    // RELATIVE QUATERNION
-    // ========================================================================
-
-    private fun calculateRelativeQuaternion(
-        calibration: Quaternion,
-        current: Quaternion
-    ): Quaternion {
-
-        return (
-                calibration.inverse() *
-                        current
-                ).normalized()
-    }
-
-    // ========================================================================
     // GRAVITY-BASED BANK ANGLE
     // ========================================================================
 
@@ -993,71 +993,14 @@ class SensorProcessor(
             return
         }
 
-        val calibration =
-            calibrationQuaternion
-
-        val forwardG: Double
-
-        if (calibration != null) {
-
-            val acceleration =
-                Vector3(
-                    x,
-                    y,
-                    z
-                )
-
-            val current =
-                currentQuaternion
-
-            if (current != null) {
-
-                val relative =
-                    calculateRelativeQuaternion(
-                        calibration,
-                        current
-                    )
-
-                val accelerationInCalibrationFrame =
-                    rotateVector(
-                        relative,
-                        acceleration
-                    )
-
-                /*
-                 * Montage:
-                 *
-                 * Rückseite des Telefons zeigt nach vorne.
-                 * Android +Z zeigt aus dem Display heraus.
-                 *
-                 * Daher:
-                 *
-                 * -Z = Fahrtrichtung.
-                 */
-                forwardG =
-                    -accelerationInCalibrationFrame.z /
-                            9.81
-
-            } else {
-
-                forwardG =
-                    -z / 9.81
-            }
-
-        } else {
-
-            /*
-             * Vor der ersten Benutzerkalibrierung wird keine
-             * Beschleunigung verarbeitet.
-             *
-             * Dadurch entstehen keine falschen Recording-Peaks.
-             */
-            return
-        }
-
-        processAcceleration(
-            forwardG
-        )
+        if (calibrationQuaternion == null) return
+        val up = calibrationGravity ?: return
+        val forwardG = forwardAccelerationProcessor.update(
+            event.timestamp,
+            ImuVector(x, y, z),
+            ImuVector(up.x, up.y, up.z),
+        ) ?: return
+        processAcceleration(forwardG)
     }
 
     // ========================================================================
@@ -1068,50 +1011,10 @@ class SensorProcessor(
         inputG: Double
     ) {
 
-        var currentForwardG =
-            inputG
-
-        /*
-         * Kleine Bewegungen ignorieren.
-         */
-        if (abs(currentForwardG) < 0.05) {
-            currentForwardG = 0.0
-        }
-
-        /*
-         * Sensor-Ausreißer begrenzen.
-         */
-        currentForwardG =
-            currentForwardG.coerceIn(
-                -2.0,
-                2.0
-            )
-
-        /*
-         * Beschleunigung.
-         */
-        if (currentForwardG >= 0.0) {
-
-            smoothedAccel +=
-                accelSmoothingAlpha *
-                        (
-                                currentForwardG -
-                                        smoothedAccel
-                                )
-
-            smoothedBrake = 0.0
-
-        } else {
-
-            smoothedBrake +=
-                accelSmoothingAlpha *
-                        (
-                                currentForwardG -
-                                        smoothedBrake
-                                )
-
-            smoothedAccel = 0.0
-        }
+        if (!inputG.isFinite()) return
+        // The signed signal is already filtered; split only the resulting value.
+        smoothedAccel = inputG.coerceAtLeast(0.0)
+        smoothedBrake = inputG.coerceAtMost(0.0)
 
         var newPeak = false
 
@@ -1410,6 +1313,7 @@ class SensorProcessor(
 
         smoothedAccel = 0.0
         smoothedBrake = 0.0
+        forwardAccelerationProcessor.reset()
 
         /*
          * GPS-Historie beginnt für die neue Aufnahme neu.

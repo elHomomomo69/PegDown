@@ -86,6 +86,7 @@ internal class CompensatedImuLeanExperiment(
     private val compensateLongitudinal: Boolean = true,
     private val compensateLateral: Boolean = true,
     private val checkYawConsistency: Boolean = false,
+    private val allowSlowCourseCorrections: Boolean = false,
     private val matchGpsInterval: Boolean = false,
     private val courseLagSeconds: Double = 0.0,
     // Diagnostic ablation only: retain every input/history, omit specified updates.
@@ -261,7 +262,8 @@ internal class CompensatedImuLeanExperiment(
         }
         fun goodCourse(value: Fix) = value.hasBearing && value.bearingDegrees.isFinite() &&
             value.bearingDegrees in 0.0..360.0 && value.bearingAccuracyDegrees.isFinite() &&
-            value.bearingAccuracyDegrees in 0.0..5.0 && value.speedMps >= 8.0
+            value.bearingAccuracyDegrees in 0.0..5.0 &&
+            value.speedMps >= if (allowSlowCourseCorrections) 3.0 else 8.0
         if (previous == null || !goodCourse(previous) || !goodCourse(fix)) {
             record(CorrectionDecision(fix.timestampNanos, DecisionReason.WAITING_FOR_COURSE))
             return
@@ -284,7 +286,8 @@ internal class CompensatedImuLeanExperiment(
             record(CorrectionDecision(start + (end - start) / 2, DecisionReason.MISSING_SPEED_HISTORY))
             return
         }
-        if (startSpeed < 8.0 || endSpeed < 8.0) {
+        val minimumSpeed = if (allowSlowCourseCorrections) 3.0 else 8.0
+        if (startSpeed < minimumSpeed || endSpeed < minimumSpeed) {
             record(CorrectionDecision(start + (end - start) / 2, DecisionReason.WAITING_FOR_COURSE))
             return
         }
@@ -326,10 +329,20 @@ internal class CompensatedImuLeanExperiment(
                 previous.bearingAccuracyDegrees * previous.bearingAccuracyDegrees
         )) / dt
         val gyroYaw = rates.map { it.second }.average()
+        val slowInterval = startSpeed < 8.0 || endSpeed < 8.0
+        val sigmaLateral = speed * sigmaCourseRate
+        // Low-speed course is optional and must meet stricter uncertainty limits.
+        // Limits use declared errors, not an assumption that a straight road means zero bank.
+        if (slowInterval && (previous.bearingAccuracyDegrees > 2.0 ||
+                fix.bearingAccuracyDegrees > 2.0 || sigmaLateral > 0.5)
+        ) {
+            record(CorrectionDecision(midpoint, DecisionReason.WAITING_FOR_COURSE))
+            return
+        }
         // Experimental consistency gate: three declared course-error scales plus
         // 0.02 rad/s model allowance. This is not a calibrated confidence interval.
         val yawLimit = 3.0 * sigmaCourseRate + 0.02
-        if (checkYawConsistency && abs(headingRate - gyroYaw) > yawLimit) {
+        if ((checkYawConsistency || slowInterval) && abs(headingRate - gyroYaw) > yawLimit) {
             record(CorrectionDecision(
                 midpoint, DecisionReason.COURSE_GYRO_MISMATCH,
                 courseRate = headingRate,
@@ -345,7 +358,6 @@ internal class CompensatedImuLeanExperiment(
             (startSpeed + endSpeed) * sin(Math.toRadians(courseDelta) / 2.0) / dt,
             0.0,
         ) else ImuVector(alongAcceleration, lateralAcceleration, 0.0)
-        val sigmaLateral = speed * sigmaCourseRate
         val quality = 1.0 / (1.0 + sigmaLateral * sigmaLateral / 4.0)
         correctAt(midpoint, bodyAcceleration, dt, quality, headingRate, gyroYaw,
             intervalStart = if (matchGpsInterval) start else null,
