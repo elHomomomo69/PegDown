@@ -221,6 +221,7 @@ class CompensatedImuLeanExperimentTest {
         val withheldReferenceTimes: Set<Long> = emptySet(),
         val gyroBias: ImuVector = ImuVector.ZERO,
         val mountYawDegrees: Double = 0.0,
+        val allowSlowCourseCorrections: Boolean = false,
     )
 
     private data class ReplayReading(val time: Double, val baseline: Double, val candidate: Double, val axisBank: Double)
@@ -308,6 +309,7 @@ class CompensatedImuLeanExperimentTest {
             compensateLongitudinal = options.compensateLongitudinal,
             compensateLateral = options.compensateLateral,
             checkYawConsistency = options.checkYawConsistency,
+            allowSlowCourseCorrections = options.allowSlowCourseCorrections,
             matchGpsInterval = options.matchGpsInterval,
             courseLagSeconds = options.courseLagSeconds,
             withheldReferenceTimes = options.withheldReferenceTimes,
@@ -1408,5 +1410,46 @@ class CompensatedImuLeanExperimentTest {
             // There is no independent measured bank label: do not assert that
             // smaller displayed angles on these real excerpts imply higher accuracy.
         }
+    }
+
+    @Test
+    fun `slow course extension transfers to earlier ride excerpts without refitting`() {
+        val (oldMeta, oldRows) = continuousOldRows()
+        val oldSeed = ImuQuaternion(oldMeta[5].toDouble(), oldMeta[2].toDouble(),
+            oldMeta[3].toDouble(), oldMeta[4].toDouble())
+        val oldUp = ImuVector(-0.9305648836431455, -0.013920558292233265, 0.36586229019543914)
+        val (newMeta, newRows) = continuousNewSubset()
+        val newSeed = ImuQuaternion(newMeta[5].toDouble(), newMeta[2].toDouble(),
+            newMeta[3].toDouble(), newMeta[4].toDouble())
+        val newUp = ImuVector(-0.9275271611854533, 0.0011311997772454063, 0.3737540443263699)
+        val cases = listOf(
+            Triple("Oct04 continuous", "old", 68.0..76.0),
+            Triple("Oct05 continuous", "new", 72.0..80.0),
+            Triple("Oct05 left", "left_exit", 12.0..20.0),
+            Triple("Oct05 right", "right_exit", 10.0..15.0),
+            Triple("Oct05 following left", "following_left_exit", 10.0..19.0),
+            Triple("Oct05 faster", "fast_left_exit", 17.0..25.0),
+        )
+        for ((label, name, window) in cases) {
+            fun result(enabled: Boolean): ReplayResult {
+                val options = ReplayOptions(matchGpsInterval = true, allowSlowCourseCorrections = enabled)
+                return when (name) {
+                    "old" -> replay(oldRows, oldUp, oldSeed, oldMeta[1].toDouble(), options = options)
+                    "new" -> replay(newRows, newUp, newSeed, newMeta[1].toDouble(), options = options)
+                    else -> replayNew(name, if (name == "fast_left_exit") 4 else 3, options)
+                }
+            }
+            val control = result(false)
+            val candidate = result(true)
+            val a = control.readings.filter { it.time in window }
+            val b = candidate.readings.filter { it.time in window }
+            assertTrue(a.size > 15)
+            assertEquals(a.map { it.time }, b.map { it.time })
+            assertEquals(0, control.gaps)
+            assertEquals(0, candidate.gaps)
+            val difference = a.zip(b).map { (x, y) -> abs(x.axisBank - y.axisBank) }
+            println("Slow transfer $label: controlAbs=${a.map { abs(it.axisBank) }.average()} candidateAbs=${b.map { abs(it.axisBank) }.average()} meanDifference=${difference.average()} maxDifference=${difference.maxOrNull()} controlAccepted=${control.corrections} candidateAccepted=${candidate.corrections} reasons=${candidate.decisions.groupingBy { it.reason }.eachCount()}")
+        }
+        // Historical real rides have no independent bank labels.
     }
 }

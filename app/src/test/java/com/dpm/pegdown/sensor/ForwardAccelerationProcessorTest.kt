@@ -82,8 +82,10 @@ class ForwardAccelerationProcessorTest {
         assumeNotNull(path)
         val file = File(path!!)
         assertTrue("Configured archive does not exist", file.isFile)
-        data class Sample(val t: Double, val g: Double, val oldG: Double)
-        data class Fix(val t: Double, val speed: Double, val course: Double)
+        data class Sample(val t: Double, val g: Double, val oldG: Double,
+            val lean: Double, val rawMinusLinearG: Double)
+        data class Fix(val t: Double, val speed: Double, val course: Double,
+            val speedAccuracy: Double, val bearingAccuracy: Double)
         val samples = mutableListOf<Sample>()
         val fixes = mutableListOf<Fix>()
         val stand = mutableListOf<Double>()
@@ -91,6 +93,8 @@ class ForwardAccelerationProcessorTest {
         var referenceUp: ImuVector? = null
         var calibration: ImuQuaternion? = null
         var current: ImuQuaternion? = null
+        var rawAcceleration: ImuVector? = null
+        var rawAccelerationTime = 0L
         var oldPositive = 0.0
         var oldNegative = 0.0
         val oldStand = mutableListOf<Double>()
@@ -115,6 +119,10 @@ class ForwardAccelerationProcessorTest {
                     } else if (fields[0] == "sensor_sample") {
                         val time = fields[2].toLong()
                         if (start == null) start = time
+                        if (fields[3] == "1") {
+                            rawAcceleration = ImuVector(fields[8].toDouble(), fields[9].toDouble(), fields[10].toDouble())
+                            rawAccelerationTime = time
+                        }
                         if (fields[3] == "15") {
                             current = ImuQuaternion(fields[11].toDouble(), fields[8].toDouble(),
                                 fields[9].toDouble(), fields[10].toDouble()).unit()
@@ -135,7 +143,10 @@ class ForwardAccelerationProcessorTest {
                                 oldPositive = 0.0
                             }
                             val oldValue = oldPositive + oldNegative
-                            samples.add(Sample(t, value, oldValue))
+                            val forward = CompensatedImuLeanExperiment.assumedForwardFromScreen(referenceUp!!)
+                            val rawMinusLinearG = if (rawAccelerationTime == time && rawAcceleration != null)
+                                (rawAcceleration!! - vector).dot(forward) / 9.81 else Double.NaN
+                            samples.add(Sample(t, value, oldValue, fields[12].toDouble(), rawMinusLinearG))
                             if (t in 40.0..60.0) {
                                 stand.add(value)
                                 oldStand.add(oldValue)
@@ -144,7 +155,9 @@ class ForwardAccelerationProcessorTest {
                     } else if (fields[0] == "location" && fields[22] == "gps" && start != null &&
                         fields[18].isNotEmpty() && fields[20].isNotEmpty()) {
                         fixes.add(Fix((fields[2].toLong() - start!!) / 1e9,
-                            fields[18].toDouble(), fields[20].toDouble()))
+                            fields[18].toDouble(), fields[20].toDouble(),
+                            fields[19].toDoubleOrNull() ?: Double.NaN,
+                            fields[21].toDoubleOrNull() ?: Double.NaN))
                     }
                 }
             }
@@ -160,7 +173,16 @@ class ForwardAccelerationProcessorTest {
         var oldErrorSum = 0.0
         var compared = 0
         var agreeing = 0
+        var opposite = 0
+        var zero = 0
+        var strongCompared = 0
+        var strongAgreeing = 0
+        var strongOpposite = 0
+        var strongZero = 0
+        val accelerationCategories = mutableMapOf<String, Int>()
         var errorSum = 0.0
+        data class Comparison(val start: Double, val end: Double, val gpsG: Double, val imuG: Double)
+        val comparisons = mutableListOf<Comparison>()
         var cursor = 0
         for ((a, b) in fixes.zipWithNext()) {
             val dt = b.t - a.t
@@ -168,13 +190,14 @@ class ForwardAccelerationProcessorTest {
             if (dt !in 0.3..2.5 || a.speed < 8.0 || b.speed < 8.0 || abs(courseDelta) > 2.0) continue
             val gpsG = (b.speed - a.speed) / dt / 9.81
             if (abs(gpsG) < 0.08) continue
-            // A causal low pass delays the signal: account for its nominal 0.35s lag.
-            while (cursor < samples.size && samples[cursor].t < a.t + 0.35) cursor++
+            // Use the native GPS interval. An EMA time constant is not a measured
+            // time offset between GPS speed and IMU; examine shifts separately below.
+            while (cursor < samples.size && samples[cursor].t < a.t) cursor++
             var j = cursor
             var sum = 0.0
             var oldSum = 0.0
             var n = 0
-            while (j < samples.size && samples[j].t <= b.t + 0.35) {
+            while (j < samples.size && samples[j].t <= b.t) {
                 sum += samples[j].g
                 oldSum += samples[j].oldG
                 n++
@@ -182,14 +205,72 @@ class ForwardAccelerationProcessorTest {
             }
             if (n == 0) continue
             val imuG = sum / n
+            comparisons.add(Comparison(a.t, b.t, gpsG, imuG))
             compared++
             val oldG = oldSum / n
-            if (oldG * gpsG > 0.0) oldAgreeing++
+            if (abs(oldG) >= 0.01 && oldG * gpsG > 0.0) oldAgreeing++
             oldErrorSum += abs(oldG - gpsG)
-            if (imuG * gpsG > 0.0) agreeing++
+            val category = when {
+                abs(imuG) < 0.01 -> { zero++; "zero" }
+                imuG * gpsG > 0.0 -> { agreeing++; "agree" }
+                else -> { opposite++; "opposite" }
+            }
+            val direction = if (gpsG > 0.0) "accel" else "brake"
+            accelerationCategories["$direction-$category"] = (accelerationCategories["$direction-$category"] ?: 0) + 1
+            val speedSigmaG = sqrt(a.speedAccuracy * a.speedAccuracy + b.speedAccuracy * b.speedAccuracy) / dt / 9.81
+            if (speedSigmaG.isFinite() && speedSigmaG <= abs(gpsG) / 2.0 &&
+                a.bearingAccuracy in 0.0..2.0 && b.bearingAccuracy in 0.0..2.0) {
+                strongCompared++
+                when (category) {
+                    "agree" -> strongAgreeing++
+                    "opposite" -> strongOpposite++
+                    else -> strongZero++
+                }
+            }
             errorSum += abs(imuG - gpsG)
         }
         assertTrue("No dynamic GPS comparison intervals", compared > 20)
+        assertEquals(compared, agreeing + opposite + zero)
+        fun windowMean(startTime: Double, endTime: Double): Double {
+            var index = samples.binarySearch { it.t.compareTo(startTime) }
+            if (index < 0) index = -index - 1
+            var sum = 0.0
+            var n = 0
+            while (index < samples.size && samples[index].t <= endTime) {
+                sum += samples[index].g
+                index++
+                n++
+            }
+            return if (n > 0) sum / n else Double.NaN
+        }
+        for (lag in listOf(-0.7, -0.35, 0.0, 0.35, 0.7)) {
+            val values = comparisons.map { it to windowMean(it.start + lag, it.end + lag) }
+            val signAgree = values.count { (c, g) -> abs(g) >= 0.01 && c.gpsG * g > 0.0 }
+            val oppositeVisible = values.count { (c, g) -> abs(g) >= 0.05 && c.gpsG * g < 0.0 }
+            val nearZero = values.count { (_, g) -> abs(g) < 0.01 }
+            println("Acceleration timing lag=$lag agree=$signAgree/${values.size} visibleOpposite=$oppositeVisible nearZero=$nearZero meanAbsoluteDifferenceG=${values.map { (c, g) -> abs(c.gpsG - g) }.average()}")
+        }
+        val sustained = comparisons.windowed(3).filter { window ->
+            window.zipWithNext().all { (a, b) -> abs(a.end - b.start) < 0.05 && a.gpsG * b.gpsG > 0.0 }
+        }.map { window ->
+            val startTime = window.first().start
+            val endTime = window.last().end
+            val gpsG = window.sumOf { it.gpsG * (it.end - it.start) } / (endTime - startTime)
+            gpsG to windowMean(startTime, endTime)
+        }
+        println("Acceleration sustained three intervals count=${sustained.size} agree=${sustained.count { (gps, imu) -> abs(imu) >= 0.01 && gps * imu > 0.0 }} visibleOpposite=${sustained.count { (gps, imu) -> abs(imu) >= 0.05 && gps * imu < 0.0 }} meanAbsoluteDifferenceG=${sustained.map { (gps, imu) -> abs(gps - imu) }.average()}")
+        val visibleOpposite = comparisons.filter { abs(it.imuG) >= 0.05 && it.gpsG * it.imuG < 0.0 }
+        visibleOpposite.take(8).forEach { c ->
+            val sourceIndex = fixes.indexOfFirst { abs(it.t - c.start) < 0.01 }
+            val nearby = fixes.subList((sourceIndex - 2).coerceAtLeast(0), (sourceIndex + 5).coerceAtMost(fixes.size))
+            val gpsPhases = nearby.zipWithNext().map { (a, b) ->
+                (b.speed - a.speed) / (b.t - a.t) / 9.81
+            }
+            val source = samples.filter { it.t in c.start..c.end }
+            val removed = source.map { it.rawMinusLinearG }.filter { it.isFinite() }
+            println("Acceleration remaining opposite nativeInterval t=${c.start}..${c.end} gpsG=${c.gpsG} imuG=${c.imuG} nearbyGpsG=$gpsPhases maxBank=${source.maxOf { abs(it.lean) }} rawMinusLinearMeanG=${removed.average()} rawMinusLinearRangeG=${(removed.maxOrNull() ?: Double.NaN) - (removed.minOrNull() ?: Double.NaN)}")
+        }
+        println("Acceleration categories: compared=$compared agree=$agreeing opposite=$opposite nearZero=$zero byDirection=$accelerationCategories strongCompared=$strongCompared strongAgree=$strongAgreeing strongOpposite=$strongOpposite strongZero=$strongZero")
         println("Acceleration replay: stationaryRms=$rms oldStationaryRms=$oldRms stationaryP95=$p95 GPSIntervals=$compared signAgreement=${agreeing.toDouble() / compared} oldSignAgreement=${oldAgreeing.toDouble() / compared} meanAbsoluteDifferenceG=${errorSum / compared} oldMeanAbsoluteDifferenceG=${oldErrorSum / compared}")
     }
 }

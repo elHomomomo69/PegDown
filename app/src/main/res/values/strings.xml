@@ -70,4 +70,5 @@
     <string name="desc_experimental_lean">Live test of the new sensor/GPS calculation. Enable before recording and recalibrate. Requires gyroscope and accelerometer. Standard and experimental angles are logged together; accuracy is not yet validated.</string>
     <string name="status_experimental_lean">Experiment: sensor/GPS</string>
     <string name="status_experimental_waiting">Experiment: recalibrate / waiting for sensors</string>
+    <string name="status_experimental_recovering">Angle unavailable – automatic recovery in progress</string>
 </resources>

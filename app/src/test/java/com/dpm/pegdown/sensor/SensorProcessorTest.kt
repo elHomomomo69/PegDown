@@ -21,6 +21,7 @@ import org.junit.Test
 class SensorProcessorTest {
 
     private lateinit var sensorProcessor: SensorProcessor
+    private var monotonicNow = 1_000_000_000L
     private val context = mockk<Context>(relaxed = true)
     private val listener = mockk<SensorUpdateListener>(relaxed = true)
     private val sensorManager = mockk<SensorManager>(relaxed = true)
@@ -44,7 +45,8 @@ class SensorProcessorTest {
         @Suppress("DEPRECATION")
         every { windowManager.defaultDisplay } returns display
         
-        sensorProcessor = SensorProcessor(context, listener)
+        monotonicNow = 1_000_000_000L
+        sensorProcessor = SensorProcessor(context, listener) { monotonicNow }
     }
 
     @After
@@ -105,10 +107,224 @@ class SensorProcessorTest {
         assertTrue(sensorProcessor.isExperimentalReady)
         sensorProcessor.handleExperimentalGyroscope(2_000_000_000L, floatArrayOf(0f, 0f, 0f))
         assertFalse(sensorProcessor.isExperimentalReady)
-        assertEquals("GYRO_GAP_RECALIBRATE", sensorProcessor.experimentalDiagnosticStatus())
+        assertEquals("GYRO_GAP_WAITING_REFERENCE", sensorProcessor.experimentalDiagnosticStatus())
         assertEquals(null, sensorProcessor.leanAngleAt(1_020_000_000L))
         sensorProcessor.handleExperimentalGyroscope(2_020_000_000L, floatArrayOf(0f, 0f, 0f))
         assertFalse(sensorProcessor.isExperimentalReady)
+    }
+
+    @Test
+    fun `watchdog invalidates when all sensor callbacks cease and stop cancels it`() {
+        val scheduled = mutableListOf<Runnable>()
+        every { anyConstructed<Handler>().postDelayed(any(), any()) } answers {
+            scheduled.add(firstArg())
+            true
+        }
+        calibrateExperimental()
+        val watchdog = scheduled.first()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        assertTrue(sensorProcessor.isExperimentalReady)
+        monotonicNow += 150_000_000L
+        watchdog.run()
+        assertTrue(sensorProcessor.isExperimentalReady)
+        monotonicNow++
+        watchdog.run()
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertEquals("GYRO_TIMEOUT_WAITING_REFERENCE", sensorProcessor.experimentalDiagnosticStatus())
+        assertEquals(null, sensorProcessor.experimentalLeanAngleDegrees())
+        assertEquals(null, sensorProcessor.leanAngleAt(1_000_000_000L))
+        io.mockk.verify { listener.onLeanAngleUpdate(any(), any(), any(), any(), any()) }
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        assertFalse(sensorProcessor.isExperimentalReady)
+        sensorProcessor.stop()
+        io.mockk.verify { anyConstructed<Handler>().removeCallbacks(watchdog) }
+        val count = scheduled.size
+        watchdog.run()
+        assertEquals(count, scheduled.size)
+    }
+
+    @Test
+    fun `accelerometer and out of order gyro cannot keep an obsolete estimate valid`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 140_000_000L
+        sensorProcessor.handleExperimentalAccelerometer(monotonicNow, floatArrayOf(0f, 0f, 9.81f))
+        sensorProcessor.handleExperimentalGyroscope(1_000_000_000L, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 20_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        assertFalse(sensorProcessor.isExperimentalReady)
+    }
+
+    @Test
+    fun `fresh delivery of delayed gyro cannot hide obsolete measurement time`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 140_000_000L
+        sensorProcessor.handleExperimentalGyroscope(1_020_000_000L, floatArrayOf(0f, 0f, 0f))
+        assertTrue(sensorProcessor.isExperimentalReady)
+        monotonicNow += 40_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertEquals("GYRO_TIMEOUT_WAITING_REFERENCE", sensorProcessor.experimentalDiagnosticStatus())
+    }
+
+    @Test
+    fun `valid timely gyro keeps estimate ready and recalibration recovers after timeout`() {
+        calibrateExperimental()
+        repeat(10) {
+            sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+            monotonicNow += 20_000_000L
+            sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+            assertTrue(sensorProcessor.isExperimentalReady)
+        }
+        monotonicNow += 200_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertEquals("GYRO_ONLY", sensorProcessor.experimentalDiagnosticStatus())
+    }
+
+    private fun feedRecovery(
+        bankDegrees: Double, seconds: Int, provider: String = "gps",
+        speedMps: Double = 0.0, yawRate: Double = 0.0,
+        provisionalBankDegrees: Double = bankDegrees,
+    ) {
+        val base = ImuQuaternion.axisAngle(ImuVector(1.0, 0.0, 0.0), Math.toRadians(80.0))
+        val up = base.inverse().rotate(ImuVector.UP)
+        val forward = CompensatedImuLeanExperiment.assumedForwardFromScreen(up)
+        repeat(seconds * 50) { index ->
+            monotonicNow += 20_000_000L
+            val pose = ImuQuaternion.axisAngle(ImuVector.UP, yawRate * monotonicNow / 1e9) *
+                base * ImuQuaternion.axisAngle(forward, Math.toRadians(bankDegrees))
+            val bodyUp = pose.inverse().rotate(ImuVector.UP)
+            val gravity = bodyUp * 9.80665 + forward.cross(bodyUp).unit() * (speedMps * yawRate)
+            val rate = bodyUp * yawRate
+            val provisional = ImuQuaternion.axisAngle(ImuVector.UP, yawRate * monotonicNow / 1e9) *
+                base * ImuQuaternion.axisAngle(forward, Math.toRadians(provisionalBankDegrees))
+            val rv = floatArrayOf(provisional.x.toFloat(), provisional.y.toFloat(), provisional.z.toFloat(), provisional.w.toFloat())
+            sensorProcessor.handleRotationVector(rv, monotonicNow)
+            sensorProcessor.handleExperimentalGyroscope(monotonicNow,
+                floatArrayOf(rate.x.toFloat(), rate.y.toFloat(), rate.z.toFloat()))
+            sensorProcessor.handleExperimentalAccelerometer(monotonicNow,
+                floatArrayOf(gravity.x.toFloat(), gravity.y.toFloat(), gravity.z.toFloat()))
+            if (index % 50 == 49) {
+                sensorProcessor.handleExperimentalFix(CompensatedImuLeanExperiment.Fix(
+                    monotonicNow - 100_000_000L, monotonicNow, speedMps,
+                    ((Math.toDegrees(yawRate * (monotonicNow - 100_000_000L) / 1e9) % 360.0) + 360.0) % 360.0,
+                    1.0, 0.1, 3.0, true, true, provider,
+                ))
+            }
+        }
+    }
+
+    @Test
+    fun `automatic recovery preserves side stand bank and original calibration`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        assertTrue(sensorProcessor.isExperimentalRecovering)
+        feedRecovery(-15.0, 2)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertEquals(null, sensorProcessor.experimentalLeanAngleDegrees())
+        assertEquals(null, sensorProcessor.leanAngleAt(monotonicNow))
+        feedRecovery(-15.0, 4)
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertFalse(sensorProcessor.isExperimentalRecovering)
+        assertTrue(sensorProcessor.isCalibrated)
+        assertEquals(0.0, sensorProcessor.calibrationOffset, 0.0)
+        assertEquals(-15.0, sensorProcessor.currentLeanAngleDegrees(), 0.05)
+    }
+
+    @Test
+    fun `untrusted references do not publish provisional rotation vector during recovery`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        feedRecovery(20.0, 5, provider = "network")
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertTrue(sensorProcessor.isExperimentalRecovering)
+        assertEquals(null, sensorProcessor.experimentalLeanAngleDegrees())
+        feedRecovery(20.0, 4)
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertEquals(20.0, sensorProcessor.currentLeanAngleDegrees(), 0.05)
+    }
+
+    @Test
+    fun `automatic recovery during a steady motorcycle turn preserves real bank`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        val yawRate = 9.80665 * kotlin.math.tan(Math.toRadians(20.0)) / 15.0
+        feedRecovery(20.0, 6, speedMps = 15.0, yawRate = yawRate)
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertFalse(sensorProcessor.isExperimentalRecovering)
+        assertEquals(20.0, sensorProcessor.currentLeanAngleDegrees(), 0.1)
+    }
+
+    @Test
+    fun `recovery waits during stationary yaw rotation despite accepted gravity corrections`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        feedRecovery(-15.0, 6, yawRate = 0.3)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertTrue(sensorProcessor.isExperimentalRecovering)
+    }
+
+    @Test
+    fun `bad provisional seed remains hidden and is retried when the reference settles`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        feedRecovery(-15.0, 5, provisionalBankDegrees = 20.0)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        assertEquals(null, sensorProcessor.experimentalLeanAngleDegrees())
+        feedRecovery(-15.0, 12)
+        assertTrue(sensorProcessor.isExperimentalReady)
+        assertEquals(-15.0, sensorProcessor.currentLeanAngleDegrees(), 0.05)
+    }
+
+    @Test
+    fun `another gyro outage discards partial recovery confirmations`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        feedRecovery(-15.0, 2)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        monotonicNow += 300_000_000L
+        sensorProcessor.checkExperimentalGyroFreshness(monotonicNow)
+        feedRecovery(-15.0, 2)
+        assertFalse(sensorProcessor.isExperimentalReady)
+        feedRecovery(-15.0, 3)
+        assertTrue(sensorProcessor.isExperimentalReady)
+    }
+
+    @Test
+    fun `GPS correction diagnostics use supplied callback time and retain unchanged bank on rejection`() {
+        calibrateExperimental()
+        sensorProcessor.handleExperimentalGyroscope(monotonicNow, floatArrayOf(0f, 0f, 0f))
+        sensorProcessor.isRecording = true
+        val location = mockk<android.location.Location>(relaxed = true)
+        every { location.elapsedRealtimeNanos } returns monotonicNow
+        every { location.provider } returns "network"
+        val receipt = monotonicNow + 20_000_000L
+        sensorProcessor.handleExperimentalLocation(location, receipt)
+        io.mockk.verify(exactly = 1) {
+            listener.onDiagnosticLeanCorrection(any(), receipt, "NON_GPS", match {
+                fun bank(key: String) = Regex("$key=([^;]+)").find(it)!!.groupValues[1].toDouble()
+                it.contains("fix_elapsed_realtime_ns=1000000000") &&
+                    kotlin.math.abs(bank("bank_before_degrees")) < 1e-6 &&
+                    bank("bank_before_degrees") == bank("bank_after_degrees")
+            })
+        }
     }
 
     @Test

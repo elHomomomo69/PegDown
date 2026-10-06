@@ -49,19 +49,63 @@ Dynamic comparison selects consecutive native GPS fixes:
 - Both speeds at least 8 m/s.
 - Absolute heading difference at most 2 degrees.
 - Absolute speed-derived acceleration at least 0.08 g.
-- IMU displayed values averaged over the fix interval shifted forward 0.35 s
-  for the new causal filter's nominal lag. The old reconstruction is measured
-  on this same window, although its filter has a different response.
+- IMU displayed values averaged over the SAME native fix interval for both
+  implementations. An earlier version assumed a +0.35 s alignment shift from
+  the EMA time constant; that was not a measured GPS/IMU delay and has been
+  removed from the primary comparison.
 - 319 intervals selected.
-- New/old sign agreement: 74.92 percent / 45.77 percent.
-- New/old mean absolute difference from GPS: 0.09824 g / 0.14233 g.
+- Direction categories use an interval-mean magnitude below 0.01 g as near zero:
+  240 agree, 32 opposite, 47 near zero for the new implementation.
+- Only 7 opposite intervals have IMU magnitude at least 0.05 g.
+- With the same 0.01 g classification threshold for both implementations,
+  new/old direction agreement is 75.24 percent / 28.53 percent.
+- New/old mean absolute difference from GPS: 0.08172 g / 0.14352 g.
+- Acceleration: 90 agree, 12 opposite, 5 near zero.
+- Braking: 150 agree, 20 opposite, 42 near zero.
+- Stricter declared-error subset: speed-difference error scale <= half the
+  observed acceleration and both course-error scales <=2 degrees:
+  308 intervals, 236 agree, 28 opposite, 44 near zero.
 
 These comparisons are diagnostic, not independent acceleration ground truth.
-The lag is the chosen filter time constant, not a measured timing offset.
+Do not interpret every non-agreeing interval as reversed acceleration.
+
+### Timing and sustained phases
+
+Fixed diagnostic window shifts were examined without changing the app filter:
+
+| IMU window shift relative to GPS | Direction agreement | Opposite >=0.05 g | Mean absolute difference |
+| --- | --- | --- | --- |
+| -0.70 s | 274/319 | 2 | 0.06721 g |
+| -0.35 s | 272/319 | 3 | 0.06911 g |
+| 0 s (primary) | 240/319 | 7 | 0.08172 g |
+| +0.35 s | 209/319 | 19 | 0.09824 g |
+| +0.70 s | 187/319 | 37 | 0.11348 g |
+
+Earlier sensor windows agree more often with GPS speed changes in this ride.
+This is consistent with relative signal timing, but does not identify a unique
+GPS latency or justify fitting a live correction delay to one ride.
+
+55 overlapping windows containing three consecutive selected GPS intervals
+with the same acceleration sign were evaluated without time shift. Direction
+agrees in 53; none has opposite sensor magnitude >=0.05 g. Mean absolute
+difference is 0.06926 g. They are overlapping diagnostic windows, not 55
+independent trials.
+
+The seven larger remaining native-interval oppositions occur at approximately
+886, 1503, 1844, 2092, 2235, 2245 and 2413 seconds. Several are near neighboring
+GPS acceleration/braking reversals. Their maximum displayed bank is roughly
+1.6–7.7 degrees, so a large sustained lean is not required for these mismatches.
+Timing, vibration, Android filtering/gravity estimation and GPS uncertainty
+cannot be isolated completely from this recording.
+
+For inspection only, the test reports the longitudinal projection of raw
+accelerometer minus Android linear-acceleration samples when their native
+timestamps match. Different sensor processing may still be involved; this
+difference is not asserted to be an independently measured gravity vector.
+
 Mounting-axis and filtering changes are combined; this comparison does not
-isolate which change contributes how much. GPS noise, signal delay and Android
-gravity estimation can explain some remaining differences. No filter parameter
-sweep on this recording was performed.
+isolate which change contributes how much. No production filter parameters or
+mounting yaw were fitted to these results.
 
 ## Validation and reproduction
 
@@ -85,8 +129,8 @@ and was not pointed at the new archive. No device tests were run.
 
 ## Remaining work
 
-Verify the new live acceleration display in a later ride. Improve the slow-start
-bank transient separately: the lean estimator currently rejects moving course
-corrections below 8 m/s. Do not simply lower that threshold without evaluating
-course accuracy, curb shocks and gyro error on recorded data. The lean algorithm
-and its thresholds were not changed in this acceleration update.
+Verify the new live acceleration display in a later ride. The separate guarded
+slow-course update is documented in SLOW_START_LEAN_EXPERIMENT.md and already
+permits experimental corrections from 3 m/s with stricter checks. The current
+follow-up changes only replay analysis, tests and documentation; live
+acceleration and lean parameters remain as in commit 950c4e5.

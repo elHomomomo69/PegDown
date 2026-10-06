@@ -67,4 +67,5 @@
     <string name="desc_experimental_lean">Live-Test der neuen Sensor-/GPS-Berechnung. Vor der Aufnahme aktivieren und neu kalibrieren. Benötigt Gyroskop und Beschleunigungssensor. Beide Winkel werden protokolliert; die Genauigkeit ist noch nicht bestätigt.</string>
     <string name="status_experimental_lean">Experiment: Sensor/GPS</string>
     <string name="status_experimental_waiting">Experiment: neu kalibrieren / warte auf Sensoren</string>
+    <string name="status_experimental_recovering">Winkel nicht verfügbar – automatische Wiederaufnahme läuft</string>
 </resources>

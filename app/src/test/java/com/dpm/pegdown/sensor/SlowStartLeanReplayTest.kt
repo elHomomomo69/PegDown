@@ -9,6 +9,11 @@ import org.junit.Assume.assumeNotNull
 import org.junit.Test
 
 class SlowStartLeanReplayTest {
+    private data class StartupBin(
+        var gyroDelta: Double = 0.0, var correctionDelta: Double = 0.0,
+        var maxAcceleration: Double = 0.0, var maxAngularRate: Double = 0.0,
+        var bank: Double = 0.0,
+    )
     @Test
     fun `native slow start replay compares guarded low speed corrections with control`() {
         val path = System.getenv("PEGDOWN_SLOW_START_ZIP")
@@ -32,6 +37,9 @@ class SlowStartLeanReplayTest {
         var maxControlReplayTime = 0.0
         var maxStartupControlDifference = 0.0
         val status = mutableMapOf<String, Int>()
+        val startupBins = sortedMapOf<Int, StartupBin>()
+        fun startupBin(t: Double): StartupBin? =
+            if (t in 70.0..<100.0) startupBins.getOrPut(t.toInt()) { StartupBin() } else null
         ZipFile(file).use { zip ->
             val entry = zip.entries().asSequence().first { it.name.endsWith(".csv") }
             zip.getInputStream(entry).bufferedReader().useLines { lines ->
@@ -59,7 +67,13 @@ class SlowStartLeanReplayTest {
                                     matchGpsInterval = true, allowSlowCourseCorrections = true)
                                 lastGyro = time
                             } else {
+                                val bankBefore = control!!.chassisBankDegrees
                                 control!!.onGyroscope(time, v)
+                                startupBin(t)?.let {
+                                    it.gyroDelta += control!!.chassisBankDegrees - bankBefore
+                                    it.maxAngularRate = maxOf(it.maxAngularRate, v.length())
+                                    it.bank = control!!.chassisBankDegrees
+                                }
                                 candidate!!.onGyroscope(time, v)
                                 val dt = (time - lastGyro) / 1e9
                                 lastGyro = time
@@ -88,17 +102,26 @@ class SlowStartLeanReplayTest {
                                 if (t in 180.0..2500.0) laterDifference.add(abs(candidateDisplay - controlDisplay))
                             }
                         } else if (f[3] == "1" && control != null) {
+                            startupBin(t)?.let { it.maxAcceleration = maxOf(it.maxAcceleration, v.length()) }
                             control!!.onAccelerometer(time, v)
                             candidate!!.onAccelerometer(time, v)
                         }
                     } else if (f[0] == "location" && control != null) {
                         fun number(i: Int) = f[i].toDoubleOrNull() ?: Double.NaN
                         val time = f[2].toLong()
-                        val arrival = start + ((f[1].toLong() - firstWallTime) * 1_000_000L)
+                        val arrival = f.getOrNull(43)?.toLongOrNull()
+                            ?: (start + ((f[1].toLong() - firstWallTime) * 1_000_000L))
                         val fix = CompensatedImuLeanExperiment.Fix(time, arrival,
                             number(18), number(20), number(21), number(19), number(17),
                             f[28] == "true", f[29] == "true", f[22])
+                        val bankBefore = control!!.chassisBankDegrees
                         control!!.onFix(fix)
+                        startupBin((arrival - start) / 1e9)?.let {
+                            it.correctionDelta += control!!.chassisBankDegrees - bankBefore
+                            it.bank = control!!.chassisBankDegrees
+                            val d = control!!.lastDecision!!
+                            println("Startup correction arrival=${(arrival - start) / 1e9} fix=${(time - start) / 1e9} reason=${d.reason} delta=${control!!.chassisBankDegrees - bankBefore} innovation=${d.innovationDegrees}")
+                        }
                         candidate!!.onFix(fix)
                         val reason = candidate!!.lastDecision!!.reason.name
                         val t = (time - start) / 1e9
@@ -112,6 +135,9 @@ class SlowStartLeanReplayTest {
                     }
                 }
             }
+        }
+        startupBins.forEach { (second, bin) ->
+            println("Startup bin t=$second gyroDelta=${bin.gyroDelta} correctionDelta=${bin.correctionDelta} bank=${bin.bank} accelMax=${bin.maxAcceleration} rateMax=${bin.maxAngularRate}")
         }
         println("Control replay maximum difference=$maxControlReplayDifference at=$maxControlReplayTime startupMax=$maxStartupControlDifference")
         assertTrue("Control does not reproduce startup display: $maxStartupControlDifference",

@@ -32,6 +32,13 @@ class LeanAngleGauge @JvmOverloads constructor(
     // -------------------------------------------------------------------------
 
     private var rawCurrentAngle = 0.0
+    private var measurementAvailable = true
+
+    fun setMeasurementAvailable(available: Boolean) {
+        if (measurementAvailable == available) return
+        measurementAvailable = available
+        invalidate()
+    }
 
     private var rawTempLeft = 0.0
     private var rawTempRight = 0.0
@@ -551,7 +558,7 @@ class LeanAngleGauge @JvmOverloads constructor(
         val rotationAngle =
             clampedCurrent.toFloat()
 
-        getBikeBitmap()?.let { bitmap ->
+        (if (measurementAvailable) getBikeBitmap() else null)?.let { bitmap ->
 
             canvas.withTranslation(
                 bikeX,
@@ -672,11 +679,11 @@ class LeanAngleGauge @JvmOverloads constructor(
                             fontMetrics.descent) / 2f
 
         canvas.drawText(
-            String.format(
+            if (measurementAvailable) String.format(
                 Locale.US,
                 "%.1f°",
                 currentAngle
-            ),
+            ) else "—",
             circleCenterX,
             textY,
             paint

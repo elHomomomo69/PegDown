@@ -10,6 +10,13 @@ interface SensorUpdateListener {
 
     fun onDiagnosticCalibration(metadata: String) = Unit
 
+    fun onDiagnosticLeanCorrection(
+        referenceNanos: Long,
+        arrivalNanos: Long,
+        reason: String,
+        metadata: String,
+    ) = Unit
+
     fun onDiagnosticSensorSample(
         sensor: Sensor,
         timestampNanos: Long,

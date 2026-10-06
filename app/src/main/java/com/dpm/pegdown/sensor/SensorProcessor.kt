@@ -26,6 +26,7 @@ import kotlin.math.sqrt
 class SensorProcessor(
     private val context: Context,
     private val listener: SensorUpdateListener,
+    private val monotonicClock: () -> Long = { android.os.SystemClock.elapsedRealtimeNanos() },
 ) : SensorEventListener {
 
     private val sensorManager =
@@ -112,12 +113,56 @@ class SensorProcessor(
     private var experimentalEstimator: CompensatedImuLeanExperiment? = null
     private var experimentalDisplay: Double? = null
     private var experimentalGyroTime = 0L
+    private var experimentalGyroArrival = 0L
+    private var experimentalRecovering = false
+    private var recoveryConfirmations = 0
+    private var recoveryFirstConfirmation = 0L
+    private var recoverySeedTime = 0L
+    private val recoveryRates = ArrayDeque<Pair<Long, ImuVector>>()
+    val isExperimentalRecovering: Boolean get() = experimentalRecovering
+
+    private fun resetExperimentalRecovery() {
+        experimentalRecovering = false
+        recoveryConfirmations = 0
+        recoveryFirstConfirmation = 0L
+        recoverySeedTime = 0L
+        recoveryRates.clear()
+    }
+    private var trackingSensors = false
+    private val gyroWatchdog = object : Runnable {
+        override fun run() {
+            if (!trackingSensors) return
+            checkExperimentalGyroFreshness(monotonicClock())
+            handler.postDelayed(this, 100L)
+        }
+    }
+
+    internal fun checkExperimentalGyroFreshness(nowNanos: Long) {
+        if (experimentalEstimator == null) return
+        // Check both delivery and measurement age: a delayed batch must not keep
+        // an obsolete attitude valid. The timer also runs when every stream stops.
+        if (nowNanos - experimentalGyroArrival > 150_000_000L ||
+            nowNanos - experimentalGyroTime > 150_000_000L) {
+            invalidateExperimentalLean("GYRO_TIMEOUT_WAITING_REFERENCE")
+        }
+    }
+
+    private fun invalidateExperimentalLean(reason: String) {
+        experimentalEstimator = null
+        experimentalDisplay = null
+        resetExperimentalRecovery()
+        experimentalRecovering = trackingSensors && isCalibrated && reason.startsWith("GYRO_")
+        experimentalNeedsSeed = experimentalRecovering
+        experimentalFailure = reason
+        synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
+        notifyUpdates()
+    }
     private var experimentalNeedsSeed = false
     private var latestRotationTimestamp = 0L
     private var experimentalFailure: String? = null
 
     val isExperimentalReady: Boolean
-        get() = experimentalEstimator != null && experimentalDisplay != null
+        get() = !experimentalRecovering && experimentalEstimator != null && experimentalDisplay != null
     fun standardLeanAngleDegrees(): Double = currentFusedAngle - calibrationOffset
     fun experimentalLeanAngleDegrees(): Double? = experimentalDisplay
     fun experimentalDiagnosticStatus(): String = when {
@@ -133,6 +178,7 @@ class SensorProcessor(
         experimentalEstimator = null
         experimentalDisplay = null
         experimentalFailure = null
+        resetExperimentalRecovery()
         experimentalNeedsSeed = false
         calibrationQuaternion = null
         calibrationGravity = null
@@ -331,6 +377,9 @@ class SensorProcessor(
 
     fun start() {
 
+        trackingSensors = true
+        handler.removeCallbacks(gyroWatchdog)
+        handler.postDelayed(gyroWatchdog, 100L)
         sensorStartupCounter = 0
         forwardAccelerationProcessor.reset()
         smoothedAccel = 0.0
@@ -338,6 +387,7 @@ class SensorProcessor(
         experimentalEstimator = null
         experimentalDisplay = null
         experimentalFailure = null
+        resetExperimentalRecovery()
         experimentalNeedsSeed = experimentalLeanEnabled && isCalibrated
         experimentalGyroTime = 0L
         latestRotationTimestamp = 0L
@@ -378,6 +428,10 @@ class SensorProcessor(
 
     fun stop() {
 
+        trackingSensors = false
+        handler.removeCallbacks(gyroWatchdog)
+        if (experimentalEstimator != null || experimentalRecovering)
+            invalidateExperimentalLean("STOPPED_WAITING_FOR_SENSORS")
         sensorManager.unregisterListener(this)
 
         peakResetRunnable?.let {
@@ -416,6 +470,7 @@ class SensorProcessor(
         experimentalEstimator = null
         experimentalDisplay = null
         experimentalFailure = null
+        resetExperimentalRecovery()
         experimentalNeedsSeed = false
         synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
 
@@ -504,6 +559,7 @@ class SensorProcessor(
         experimentalEstimator = null
         experimentalDisplay = null
         experimentalFailure = null
+        resetExperimentalRecovery()
         experimentalNeedsSeed = experimentalLeanEnabled
         experimentalGyroTime = 0L
         synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
@@ -621,8 +677,7 @@ class SensorProcessor(
         when (event.sensor.type) {
 
             Sensor.TYPE_GAME_ROTATION_VECTOR -> {
-                latestRotationTimestamp = event.timestamp
-                handleRotationVector(event.values)
+                handleRotationVector(event.values, event.timestamp)
                 if (!experimentalLeanEnabled) recordLeanTimestampSample(event.timestamp)
             }
 
@@ -677,7 +732,11 @@ class SensorProcessor(
             values.size < 3 || timestampNanos <= 0L) return
         val rate = ImuVector(values[0].toDouble(), values[1].toDouble(), values[2].toDouble())
         if (!rate.finite()) return
+        if (experimentalRecovering && (monotonicClock() - timestampNanos !in 0L..150_000_000L)) return
         if (experimentalEstimator == null && experimentalNeedsSeed) {
+            // Recovery needs a fresh rotation-vector seed, but it is provisional:
+            // its bank is not displayed until independent motion-compensated checks agree.
+            if (experimentalRecovering && latestRotationTimestamp <= 0L) return
             val q = currentQuaternion ?: return
             if (!listOf(q.w, q.x, q.y, q.z).all { it.isFinite() }) return
             val gravity = calibrationGravity ?: return
@@ -690,8 +749,10 @@ class SensorProcessor(
                 matchGpsInterval = true,
                 allowSlowCourseCorrections = true,
             )
-            experimentalDisplay = experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
+            experimentalDisplay = if (experimentalRecovering) null
+                else experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
             experimentalGyroTime = timestampNanos
+            if (experimentalRecovering) recoverySeedTime = timestampNanos
             experimentalNeedsSeed = false
         } else {
             val estimator = experimentalEstimator ?: return
@@ -699,11 +760,7 @@ class SensorProcessor(
             estimator.onGyroscope(timestampNanos, rate)
             if (estimator.gyroGaps > 0) {
                 // Do not present a stale integrated attitude after a sensor gap.
-                experimentalEstimator = null
-                experimentalDisplay = null
-                experimentalFailure = "GYRO_GAP_RECALIBRATE"
-                synchronized(leanTimestampSamplesLock) { leanTimestampSamples.clear() }
-                notifyUpdates()
+                invalidateExperimentalLean("GYRO_GAP_WAITING_REFERENCE")
                 return
             }
             val dt = (timestampNanos - experimentalGyroTime) / 1e9
@@ -712,18 +769,27 @@ class SensorProcessor(
             val alpha = 1.0 - exp(-dt / tau)
             val raw = estimator.chassisBankDegrees
             val target = (if (abs(raw) < 0.20) 0.0 else raw).coerceIn(-65.0, 65.0)
-            experimentalDisplay = experimentalDisplay!! + alpha * (target - experimentalDisplay!!)
+            experimentalDisplay = experimentalDisplay?.let { it + alpha * (target - it) }
+        }
+        experimentalGyroArrival = monotonicClock()
+        if (experimentalRecovering) {
+            recoveryRates.addLast(timestampNanos to rate)
+            while (recoveryRates.isNotEmpty() && timestampNanos - recoveryRates.first().first > 1_000_000_000L)
+                recoveryRates.removeFirst()
+            notifyUpdates()
+            return
         }
         recordLeanTimestampSample(timestampNanos)
         processLeanAngle()
     }
 
-    fun handleExperimentalLocation(location: android.location.Location) {
-        val estimator = experimentalEstimator ?: return
-        if (!experimentalLeanEnabled) return
-        estimator.onFix(CompensatedImuLeanExperiment.Fix(
+    fun handleExperimentalLocation(
+        location: android.location.Location,
+        arrivalNanos: Long = monotonicClock(),
+    ) {
+        handleExperimentalFix(CompensatedImuLeanExperiment.Fix(
             timestampNanos = location.elapsedRealtimeNanos,
-            arrivalNanos = android.os.SystemClock.elapsedRealtimeNanos(),
+            arrivalNanos = arrivalNanos,
             speedMps = location.speed.toDouble(),
             bearingDegrees = location.bearing.toDouble(),
             bearingAccuracyDegrees = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && location.hasBearingAccuracy())
@@ -734,6 +800,86 @@ class SensorProcessor(
             hasSpeed = location.hasSpeed(), hasBearing = location.hasBearing(),
             provider = location.provider.orEmpty(),
         ))
+    }
+
+    internal fun handleExperimentalFix(fix: CompensatedImuLeanExperiment.Fix) {
+        val arrivalNanos = fix.arrivalNanos
+        checkExperimentalGyroFreshness(arrivalNanos)
+        val estimator = experimentalEstimator ?: return
+        if (!experimentalLeanEnabled) return
+        val bankBefore = estimator.chassisBankDegrees
+        estimator.onFix(fix)
+        val decision = estimator.lastDecision ?: return
+        if (experimentalRecovering) {
+            confirmExperimentalRecovery(estimator, decision, fix)
+        }
+        if (isRecording) {
+            val trace = decision.gravityTrace
+            val metadata = listOf(
+                "fix_elapsed_realtime_ns=${fix.timestampNanos}",
+                "innovation_degrees=${decision.innovationDegrees}",
+                "gravity_mps2=${decision.gravityMagnitude}",
+                "max_roll_rate_radps=${decision.maxRollRate}",
+                "yaw_rate_range_radps=${decision.yawRateRange}",
+                "course_rate_radps=${decision.courseRate ?: trace?.courseRate}",
+                "gyro_yaw_rate_radps=${decision.meanGyroYawRate ?: trace?.meanGyroYawRate}",
+                "yaw_discrepancy_limit_radps=${decision.yawDiscrepancyLimit}",
+                "gain=${trace?.gain}",
+                "recovery_waiting=$experimentalRecovering",
+                "recovery_confirmations=$recoveryConfirmations",
+                "bank_before_degrees=$bankBefore",
+                "bank_after_degrees=${estimator.chassisBankDegrees}",
+                "predicted_bank_degrees=${trace?.predictedBank}",
+                "measured_bank_degrees=${trace?.measuredBank}",
+                "measured_acceleration_xyz_mps2=${trace?.measured?.let { "${it.x}|${it.y}|${it.z}" }}",
+                "predicted_movement_xyz_mps2=${trace?.predictedMovement?.let { "${it.x}|${it.y}|${it.z}" }}",
+                "inferred_gravity_xyz_mps2=${trace?.inferredGravity?.let { "${it.x}|${it.y}|${it.z}" }}",
+                "inferred_bank_degrees=${trace?.inferredBank}",
+                "predicted_pitch_degrees=${trace?.predictedPitch}",
+                "inferred_pitch_degrees=${trace?.inferredPitch}",
+            ).joinToString("; ")
+            listener.onDiagnosticLeanCorrection(
+                decision.timestampNanos, arrivalNanos, decision.reason.name, metadata,
+            )
+        }
+    }
+
+    private fun confirmExperimentalRecovery(
+        estimator: CompensatedImuLeanExperiment,
+        decision: CompensatedImuLeanExperiment.CorrectionDecision,
+        fix: CompensatedImuLeanExperiment.Fix,
+    ) {
+        val arrivalNanos = fix.arrivalNanos
+        if (decision.reason == CompensatedImuLeanExperiment.DecisionReason.NON_GPS) return
+        val trace = decision.gravityTrace
+        val stationary = fix.hasSpeed && fix.speedMps <= 0.4
+        val quietGyro = recoveryRates.size >= 4 &&
+            recoveryRates.last().first - recoveryRates.first().first >= 500_000_000L &&
+            (recoveryRates.fold(ImuVector.ZERO) { sum, entry -> sum + entry.second } *
+                (1.0 / recoveryRates.size)).length() < 0.08
+        val preciseCourse = fix.hasBearing && fix.bearingAccuracyDegrees in 0.0..2.0 &&
+            fix.speedAccuracyMps in 0.0..0.5
+        val confirmed = decision.reason == CompensatedImuLeanExperiment.DecisionReason.ACCEPTED &&
+            decision.innovationDegrees?.let { it <= 3.0 } == true && trace != null &&
+            abs(estimator.chassisBankDegrees - trace.currentBankBefore) <= 1.0 &&
+            (if (stationary) quietGyro else preciseCourse)
+        if (!confirmed) {
+            recoveryConfirmations = 0
+            recoveryFirstConfirmation = 0L
+            // A poor provisional seed must not prevent recovery forever when the
+            // Android reference later settles. Retry it without publishing it.
+            if (arrivalNanos - recoverySeedTime > 10_000_000_000L)
+                invalidateExperimentalLean("GYRO_RECOVERY_WAITING_REFERENCE")
+            return
+        }
+        if (recoveryConfirmations == 0) recoveryFirstConfirmation = arrivalNanos
+        recoveryConfirmations++
+        if (recoveryConfirmations < 3 || arrivalNanos - recoveryFirstConfirmation < 2_000_000_000L) return
+        resetExperimentalRecovery()
+        experimentalFailure = null
+        experimentalDisplay = estimator.chassisBankDegrees.coerceIn(-65.0, 65.0)
+        recordLeanTimestampSample(experimentalGyroTime)
+        processLeanAngle()
     }
 
     fun diagnosticSensors(): List<Sensor> =
@@ -778,6 +924,13 @@ class SensorProcessor(
             "imu_sampling_hint_us=20000",
             "gps_interval_diagnostic_ms=500",
             "gps_min_distance_diagnostic_m=0",
+            "diagnostic_schema_version=2",
+            "experimental_gyro_timeout_ms=150",
+            "experimental_gyro_recovery=automatic_confirmed_reference",
+            "experimental_recovery_min_confirmations=3",
+            "experimental_recovery_min_duration_ms=2000",
+            "experimental_recovery_max_innovation_degrees=3",
+            "experimental_gyro_watchdog_interval_ms=100",
         ).joinToString("; ")
     }
 
@@ -785,11 +938,11 @@ class SensorProcessor(
     // ROTATION VECTOR
     // ========================================================================
 
-    internal fun handleRotationVector(values: FloatArray) {
-
+    internal fun handleRotationVector(values: FloatArray, timestampNanos: Long = 0L) {
         val quaternion =
             quaternionFromRotationVector(values) ?: return
 
+        if (timestampNanos > 0L) latestRotationTimestamp = timestampNanos
         currentQuaternion = quaternion
 
         /*

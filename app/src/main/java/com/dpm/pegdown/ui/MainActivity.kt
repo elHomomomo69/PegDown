@@ -1065,7 +1065,17 @@ class MainActivity : AppCompatActivity(),
         val service =
             recordingService ?: return
 
+        if (::gaugeView.isInitialized) {
+            gaugeView.setMeasurementAvailable(
+                !service.isExperimentalLeanEnabled() || service.isExperimentalLeanReady(),
+            )
+        }
         when {
+
+            service.isExperimentalLeanRecovering() -> {
+                tvStatus.text = getString(R.string.status_experimental_recovering)
+                tvStatus.setTextColor("#FFB300".toColorInt())
+            }
 
             service.isCalibrationInProgress() -> {
 
@@ -1099,7 +1109,7 @@ class MainActivity : AppCompatActivity(),
                 )
             }
         }
-        if (service.isExperimentalLeanEnabled()) {
+        if (service.isExperimentalLeanEnabled() && !service.isExperimentalLeanRecovering()) {
             tvStatus.append("\n" + getString(
                 if (service.isExperimentalLeanReady()) R.string.status_experimental_lean
                 else R.string.status_experimental_waiting

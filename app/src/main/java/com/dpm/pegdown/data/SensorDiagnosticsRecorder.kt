@@ -109,6 +109,7 @@ class SensorDiagnosticsRecorder(context: Context) {
         calibrated: Boolean,
         callbackLeanDegrees: Double = estimatedLeanDegrees,
         leanAlignedToFix: Boolean = true,
+        callbackElapsedRealtimeNanos: Long = android.os.SystemClock.elapsedRealtimeNanos(),
         standardLeanDegrees: Double = callbackLeanDegrees,
         experimentalLeanDegrees: Double? = null,
         leanMode: String = "android_standard",
@@ -151,6 +152,7 @@ class SensorDiagnosticsRecorder(context: Context) {
         } else {
             ""
         }
+        fields[43] = callbackElapsedRealtimeNanos.toString()
         fields[37] = callbackLeanDegrees.toString()
         fields[38] = leanAlignedToFix.toString()
         fields[39] = standardLeanDegrees.toString()
@@ -158,6 +160,18 @@ class SensorDiagnosticsRecorder(context: Context) {
         fields[41] = leanMode
         fields[42] = experimentalStatus
         enqueue(fields)
+    }
+
+    fun recordLeanCorrection(referenceNanos: Long, arrivalNanos: Long, reason: String, metadata: String) {
+        if (!acceptingSamples) return
+        enqueue(blankRow("lean_correction").apply {
+            this[1] = System.currentTimeMillis().toString()
+            this[2] = referenceNanos.toString()
+            this[36] = metadata
+            this[41] = "experimental_full_interval"
+            this[42] = reason
+            this[43] = arrivalNanos.toString()
+        })
     }
 
     fun recordCalibration(metadata: String) {
@@ -312,8 +326,8 @@ class SensorDiagnosticsRecorder(context: Context) {
         }
 
     private companion object {
-        const val COLUMN_COUNT = 43
+        const val COLUMN_COUNT = 44
         const val CSV_HEADER =
-            "record_type,wall_time_ms,elapsed_realtime_ns,sensor_type,sensor_name,sensor_vendor,sensor_version,sensor_accuracy,value_0,value_1,value_2,value_3,lean_estimate_deg,calibrated,latitude,longitude,altitude_m,location_accuracy_m,speed_mps,speed_accuracy_mps,bearing_deg,bearing_accuracy_deg,provider,location_time_ms,location_elapsed_realtime_ns,sensor_resolution,sensor_max_range,sensor_min_delay_us,has_speed,has_bearing,has_altitude,has_location_accuracy,has_speed_accuracy,has_bearing_accuracy,has_vertical_accuracy,vertical_accuracy_m,metadata,lean_callback_deg,lean_aligned_to_fix,lean_standard_callback_deg,lean_experimental_callback_deg,lean_mode,experimental_status"
+            "record_type,wall_time_ms,elapsed_realtime_ns,sensor_type,sensor_name,sensor_vendor,sensor_version,sensor_accuracy,value_0,value_1,value_2,value_3,lean_estimate_deg,calibrated,latitude,longitude,altitude_m,location_accuracy_m,speed_mps,speed_accuracy_mps,bearing_deg,bearing_accuracy_deg,provider,location_time_ms,location_elapsed_realtime_ns,sensor_resolution,sensor_max_range,sensor_min_delay_us,has_speed,has_bearing,has_altitude,has_location_accuracy,has_speed_accuracy,has_bearing_accuracy,has_vertical_accuracy,vertical_accuracy_m,metadata,lean_callback_deg,lean_aligned_to_fix,lean_standard_callback_deg,lean_experimental_callback_deg,lean_mode,experimental_status,callback_elapsed_realtime_ns"
     }
 }

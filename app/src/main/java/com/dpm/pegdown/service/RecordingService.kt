@@ -10,6 +10,7 @@ import android.location.Location
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import com.dpm.pegdown.R
 import com.dpm.pegdown.data.SensorDiagnosticsRecorder
@@ -216,6 +217,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
 
     fun isExperimentalLeanEnabled(): Boolean = sensorProcessor.experimentalLeanEnabled
     fun isExperimentalLeanReady(): Boolean = sensorProcessor.isExperimentalReady
+    fun isExperimentalLeanRecovering(): Boolean = sensorProcessor.isExperimentalRecovering
 
     fun hasSensorData(): Boolean {
         return sensorProcessor.hasSensorData
@@ -285,6 +287,15 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         )
     }
 
+    override fun onDiagnosticLeanCorrection(
+        referenceNanos: Long,
+        arrivalNanos: Long,
+        reason: String,
+        metadata: String,
+    ) {
+        if (isRecording) diagnosticsRecorder.recordLeanCorrection(referenceNanos, arrivalNanos, reason, metadata)
+    }
+
     override fun onLeanAngleUpdate(
         current: Double,
         tempL: Double,
@@ -329,11 +340,12 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
         location: Location,
         speedKmH: Double
     ) {
+        val arrivalNanos = SystemClock.elapsedRealtimeNanos()
         sensorProcessor.currentLatitude = location.latitude
         sensorProcessor.currentLongitude = location.longitude
         sensorProcessor.currentAltitude = if (location.hasAltitude()) location.altitude else 0.0
         sensorProcessor.currentSpeedKmH = speedKmH
-        sensorProcessor.handleExperimentalLocation(location)
+        sensorProcessor.handleExperimentalLocation(location, arrivalNanos)
         val callbackLeanDegrees = sensorProcessor.currentLeanAngleDegrees()
         val leanAtFixDegrees = sensorProcessor.leanAngleAt(location.elapsedRealtimeNanos)
         if (isRecording) {
@@ -343,6 +355,7 @@ class RecordingService : Service(), SensorUpdateListener, LocationUpdateListener
                 calibrated = isCalibrated(),
                 callbackLeanDegrees = callbackLeanDegrees,
                 leanAlignedToFix = leanAtFixDegrees != null,
+                callbackElapsedRealtimeNanos = arrivalNanos,
                 standardLeanDegrees = sensorProcessor.standardLeanAngleDegrees(),
                 experimentalLeanDegrees = sensorProcessor.experimentalLeanAngleDegrees(),
                 leanMode = if (sensorProcessor.experimentalLeanEnabled) "experimental_full_interval" else "android_standard",
