@@ -17,13 +17,26 @@ Reconstruction from a documented stationary checkpoint agrees with 53 recorded
 pre/post correction bank values within 0.000001853°. Omitting only that update
 isolates its causal effect; it does not supply independent true bank.
 
-## Live rule
+## Live rule — version 2
 
 SensorProcessor enables qualifyStationaryCorrections in the opt-in experimental
 estimator. The shared estimator defaults it off for historical replay controls.
 The standard Android lean mode is unaffected.
 
-For the existing GPS speed <=0.4 m/s branch only:
+For the existing GPS speed <=0.4 m/s branch only, first qualify GPS history:
+
+- Cover at least 750 ms with valid native GPS fixes; adjacent intervals must
+  be 0.3–2.5 s, and reported speed errors must be <=0.3 m/s.
+- Normally all covered speeds must be <=0.4 m/s. For each interval require
+  (absolute speed difference + root-sum-square endpoint speed errors) / dt
+  <=0.5 m/s².
+- A coarse interval >=1.5 s ending at <=0.1 m/s may contain braking followed
+  by a complete stop. In that case allow the IMU guard to decide rather than
+  treating the whole interval's average braking as acceleration at its end.
+  The GPS history/accuracy checks and all IMU checks still apply.
+- Otherwise record STATIONARY_SPEED_UNCERTAIN without changing orientation.
+
+Then apply the existing sensor checks:
 
 1. Require 750 ms of bracketed accelerometer and gyro history, without sensor
    gaps beyond the existing 150 ms interpolation limit.
@@ -74,7 +87,7 @@ automatic resumption, high-frequency vibration, stable -15° side stand with
 offsets, limit inclusivity, and unchanged true 20° moving bank. Existing
 SensorProcessor recovery tests also pass with the live guard enabled.
 
-## Full native ride transfer checks
+## Full native ride transfer checks — version 1 history
 
 All runs use the same fixed thresholds and recorded input order.
 
@@ -123,12 +136,66 @@ exists for that event.
 
 Existing compact fixture and synthetic tests also run in the regular unit suite.
 
+## Version 2 regression and transfer checks
+
+The neutral review exposed a uniform-braking counterexample: an upright device
+braking at 2 m/s² from 2.3 m/s reaches a correctly reported 0.3 m/s after one
+second. Stable IMU means alone accepted this as gravity and applied 3.26755°
+of false tilt. A subsequent pure-yaw geometry check transferred the error into
+3.26755° of bank. Version 2 rejects the reference; the same bank remains zero.
+The pure-yaw step is a geometry test, not a full riding trajectory.
+
+Other portable tests cover half-second GPS updates, low but changing speeds,
+uncertain/missing/stale GPS history, reset after a bad fix, automatic resumption,
+the coarse braking-then-stop case, and threshold boundaries. Existing vibration,
+-15° side-stand, mount geometry and automatic gyro recovery tests remain active.
+
+The first implementation required every previous GPS speed to be low even
+for two-second sampling. That could discard a genuine complete stop and
+produced a 24.894° difference later in the October 4 replay. The coarse-stop
+rule above addresses this temporal ambiguity. With that rule, the difference
+at that later maximum is no longer the replay maximum.
+
+Final full-stream comparisons with the historical unguarded policy:
+
+| Source | Original stationary accepts | V2 accepts | IMU guard rejections | GPS guard rejections | Mean display difference | Maximum display difference |
+|---|---:|---:|---:|---:|---:|---:|
+| October 4 | 153 | 135 | 5 | 14 | 0.033254° | 5.158455° |
+| October 5 | 23 | 10 | 5 | 8 | 0.046857° | 7.348707° |
+| October 6 | 193 | 162 | 18 | 13 | 0.087383° | 7.733153° |
+| November 1 | 197 | 151 | 28 | 18 | 0.139954° | 6.719353° |
+
+All streams have zero gyro gaps. These remain behavior comparisons, not true
+angular error measurements. Acceptance counts need not subtract exactly because
+changed orientation affects later gates.
+
+### Bundled November fixture
+
+november_20261101_stationary_reference.csv contains 217 original gyro and raw
+acceleration samples from about 54.75 s through the callback for the 55.867764 s
+reference, plus calibration direction, preceding speed fixes and recorded
+pre-update bank/pitch. It contains no latitude/longitude or full ride archive.
+
+NovemberRideStartReplayTest.bundledNovemberReferenceReproducesTheRecordedUpdateAndRejectsIt
+always runs without environment variables. It anchors the documented
+pre-update orientation, reconstructs the local gyro history, reproduces
+recorded before/after bank and the 5.25899° original update within 0.00001°,
+then requires STATIONARY_UNSTABLE with complete speed/sensor history and
+exactly unchanged bank. Earlier GPS corrections are not replayed by this local
+fixture. The optional full checkpoint replay supplies the wider causal check.
+Neither test supplies independent true riding bank.
+
 ## Diagnostic identification
 
-Session metadata includes experimental_stationary_guard=true and all three
-limits. Correction metadata includes evaluated start/end, history coverage,
-maximum mean acceleration difference, maximum mean angular rate and qualified
-status. The CSV column schema stays unchanged.
+Session metadata includes experimental_stationary_guard=true, version 2,
+all GPS/IMU limits, app_version_name, app_version_code and app_build_id.
+The build ID is read from the same generated string resource as the visible
+label; it remains stable for identical production sources/configuration.
+
+Correction metadata includes sensor and speed history intervals/coverage,
+maximum mean acceleration difference, maximum mean angular rate, maximum
+speed/error, estimated acceleration allowance, coarse-stop decision and both
+qualification results. The CSV column schema stays unchanged.
 
 ## Reproduce
 
@@ -144,7 +211,9 @@ Set PEGDOWN_STATIONARY_RIDE to a CSV or ZIP and run
 For ZIPs containing multiple CSVs, also set PEGDOWN_STATIONARY_ENTRY to the
 exact entry name, e.g. PegDown_sensor_diagnostics_20261006_100733.csv.
 
-Portable tests: StationaryCorrectionTest and SensorProcessorTest.
+Portable tests: StationaryCorrectionTest, SensorProcessorTest, and the bundled
+NovemberRideStartReplayTest method above. Only the full November checkpoint
+method requires the external ZIP.
 
 Validation: complete :app:testDebugUnitTest and :app:assembleDebug passed with
 both November native replays enabled. No device tests or post-change live ride

@@ -90,6 +90,7 @@ internal class CompensatedImuLeanExperiment(
     private val matchGpsInterval: Boolean = false,
     // SensorProcessor enables this for live estimation; false preserves historical replay controls.
     private val qualifyStationaryCorrections: Boolean = false,
+    private val correctStraightRideDrift: Boolean = false,
     private val courseLagSeconds: Double = 0.0,
     // Diagnostic ablation only: retain every input/history, omit specified updates.
     private val withheldReferenceTimes: Set<Long> = emptySet(),
@@ -113,7 +114,7 @@ internal class CompensatedImuLeanExperiment(
         INSUFFICIENT_STATES, ROLLING(true), CHANGING_YAW(true),
         MISSING_HISTORY, MISSING_SPEED_HISTORY, INSUFFICIENT_ACCELERATION,
         IMPLAUSIBLE_GRAVITY(true), LARGE_INNOVATION(true), COURSE_GYRO_MISMATCH(true),
-        STATIONARY_UNSTABLE(true),
+        STATIONARY_UNSTABLE(true), STATIONARY_SPEED_UNCERTAIN(true),
     }
 
     data class MotionTrace(
@@ -133,6 +134,22 @@ internal class CompensatedImuLeanExperiment(
         val qualified: Boolean get() = historyCovered &&
             maxMeanAccelerationDifferenceMps2?.let { it <= STATIONARY_ACCELERATION_DELTA_MPS2 } == true &&
             maxMeanAngularRateRadps?.let { it <= STATIONARY_ANGULAR_RATE_RADPS } == true
+    }
+
+    data class StationarySpeedTrace(
+        val intervalStartNanos: Long,
+        val intervalEndNanos: Long,
+        val historyCovered: Boolean,
+        val maximumSpeedMps: Double? = null,
+        val maximumSpeedAccuracyMps: Double? = null,
+        val maximumAccelerationUpperMps2: Double? = null,
+        val coarseStopTransition: Boolean = false,
+    ) {
+        val qualified: Boolean get() = historyCovered &&
+            maximumSpeedAccuracyMps?.let { it <= STATIONARY_MAX_SPEED_ACCURACY_MPS } == true &&
+            (coarseStopTransition ||
+                (maximumSpeedMps?.let { it <= STATIONARY_MAX_SPEED_MPS } == true &&
+                    maximumAccelerationUpperMps2?.let { it <= STATIONARY_MAX_ACCELERATION_UPPER_MPS2 } == true))
     }
 
     data class GravityTrace(
@@ -170,9 +187,15 @@ internal class CompensatedImuLeanExperiment(
         val meanGyroYawRate: Double? = null,
         val yawDiscrepancyLimit: Double? = null,
         val motionTrace: MotionTrace? = null,
+        val stationarySpeedTrace: StationarySpeedTrace? = null,
     )
 
+    private val straightReference = StraightRideReference()
+    var straightTrace: StraightRideReference.Trace? = null
+        private set
+
     private var activeMotionTrace: MotionTrace? = null
+    private var activeStationarySpeedTrace: StationarySpeedTrace? = null
     private val decisionLog = mutableListOf<CorrectionDecision>()
     val decisions: List<CorrectionDecision>
         get() = decisionLog.toList()
@@ -186,6 +209,7 @@ internal class CompensatedImuLeanExperiment(
             maxRollRate = input.maxRollRate ?: motion?.maxRollRate,
             yawRateRange = input.yawRateRange ?: motion?.yawRateRange,
             motionTrace = motion,
+            stationarySpeedTrace = input.stationarySpeedTrace ?: activeStationarySpeedTrace,
         )
         if (decisionLog.size >= 1024) decisionLog.removeAt(0)
         decisionLog.add(decision)
@@ -241,6 +265,7 @@ internal class CompensatedImuLeanExperiment(
         val rate = measuredRate - gyroBias
         if (dt > 0.15 || rate.length() > 20.0) {
             gyroGaps++
+            straightTrace = straightReference.reset("GYRO_GAP")
             states.clear()
             acceleration.clear()
             speedHistory.clear()
@@ -268,8 +293,90 @@ internal class CompensatedImuLeanExperiment(
             speedHistory.removeFirst()
     }
 
-    fun onFix(fix: Fix) {
+    fun onFix(fix: Fix, allowStraightCorrection: Boolean = true) {
+        val previous = previousFix
+        applyFix(fix)
+        if (!correctStraightRideDrift) return
+        if (!allowStraightCorrection) {
+            straightTrace = straightReference.reset("RECOVERY_PENDING")
+            return
+        }
+        if (fix.provider != "gps") {
+            straightTrace = StraightRideReference.Trace("NON_GPS")
+            return
+        }
+        val decision = lastDecision
+        val trace = decision?.gravityTrace
+        if (previous == null || fix.timestampNanos <= previous.timestampNanos ||
+            decision?.reason != DecisionReason.ACCEPTED || trace == null ||
+            fix.speedMps <= 0.4) {
+            straightTrace = straightReference.reset(
+                if (fix.speedMps <= 0.4) "STATIONARY" else "BASE_${decision?.reason}")
+            return
+        }
+        val recentRate = timeWeightedMean(states.map { it.timestampNanos to it.angularRate },
+            lastGyroTime - 250_000_000L, lastGyroTime)
+        if (recentRate == null) {
+            straightTrace = straightReference.reset("MISSING_RECENT_GYRO")
+            return
+        }
+        val currentUp = up(orientation)
+        val currentForward = (forward - currentUp * forward.dot(currentUp)).unit()
+        if (abs(recentRate.dot(currentUp)) > .04 || abs(recentRate.dot(currentForward)) > .12) {
+            straightTrace = straightReference.reset("ROTATING_NOW")
+            return
+        }
+        val intervalRate = timeWeightedMean(states.map { it.timestampNanos to it.angularRate },
+            previous.timestampNanos, fix.timestampNanos)
+        val intervalPose = stateAt(previous.timestampNanos +
+            (fix.timestampNanos - previous.timestampNanos) / 2)
+        if (intervalRate == null || intervalPose == null) {
+            straightTrace = straightReference.reset("MISSING_INTERVAL_GYRO")
+            return
+        }
+        val intervalUp = up(intervalPose)
+        val intervalForward = (forward - intervalUp * forward.dot(intervalUp)).unit()
+        val gyroYaw = trace.meanGyroYawRate ?: Double.NaN
+        val observation = StraightRideReference.Observation(
+            previous.timestampNanos, fix.timestampNanos,
+            minOf(previous.speedMps, fix.speedMps), maxOf(previous.speedMps, fix.speedMps),
+            previous.bearingDegrees, fix.bearingDegrees,
+            previous.bearingAccuracyDegrees, fix.bearingAccuracyDegrees,
+            maxOf(previous.speedAccuracyMps, fix.speedAccuracyMps),
+            maxOf(previous.positionAccuracyMetres, fix.positionAccuracyMetres),
+            maxOf((fix.arrivalNanos - fix.timestampNanos) / 1e9,
+                (lastGyroTime - fix.timestampNanos) / 1e9),
+            trace.vehicleAcceleration.x,
+            gyroYaw,
+            abs(intervalRate.dot(intervalForward)),
+            trace.inferredBank, trace.inferredPitch, trace.inferredGravity.length(),
+        )
+        val qualification = straightReference.observe(observation)
+        straightTrace = qualification
+        if (!qualification.qualified) return
+        val bankBefore = chassisBankDegrees
+        if (abs(bankBefore) <= StraightRideReference.BANK_DEADBAND_DEGREES) return
+        val dt = (fix.timestampNanos - previous.timestampNanos) / 1e9
+        val limit = StraightRideReference.MAXIMUM_CORRECTION_DEGREES_PER_SECOND * dt
+        val step = (bankBefore * (1.0 - exp(-dt / 30.0))).coerceIn(-limit, limit)
+        // Correct the orientation, preserving pitch. Do not offset just the display.
+        val pitch = Math.toRadians(geometry.pitchDegrees(currentUp))
+        val bank = Math.toRadians(bankBefore - step)
+        val calibrationRight = forward.cross(calibrationUp).unit()
+        val targetUp = calibrationUp * (cos(pitch) * cos(bank)) -
+            calibrationRight * (cos(pitch) * sin(bank)) + forward * sin(pitch)
+        val corrected = (orientation * ImuQuaternion.between(targetUp, currentUp)).unit()
+        val worldCorrection = (corrected * orientation.inverse()).unit()
+        orientation = corrected
+        // Preserve relative gyro motion throughout the retained alignment history.
+        states.forEach { it.orientation = (worldCorrection * it.orientation).unit() }
+        straightTrace = qualification.copy(reason = "APPLIED",
+            appliedBankDeltaDegrees = chassisBankDegrees - bankBefore)
+    }
+
+    private fun applyFix(fix: Fix) {
         activeMotionTrace = null
+        activeStationarySpeedTrace = null
         if (fix.provider != "gps") {
             record(CorrectionDecision(fix.timestampNanos, DecisionReason.NON_GPS))
             return
@@ -292,7 +399,15 @@ internal class CompensatedImuLeanExperiment(
         }
         previousFix = fix
         speedHistory.addLast(fix)
-        if (fix.speedMps <= 0.4) {
+        if (fix.speedMps <= STATIONARY_MAX_SPEED_MPS) {
+            if (qualifyStationaryCorrections) {
+                val speedTrace = stationarySpeedTrace(fix.timestampNanos)
+                activeStationarySpeedTrace = speedTrace
+                if (!speedTrace.qualified) {
+                    record(CorrectionDecision(fix.timestampNanos, DecisionReason.STATIONARY_SPEED_UNCERTAIN))
+                    return
+                }
+            }
             val dt = previous?.let { (fix.timestampNanos - it.timestampNanos) / 1e9 } ?: 1.0
             correctAt(fix.timestampNanos, ImuVector.ZERO, dt.coerceIn(0.0, 2.5), 1.0, stationary = true)
             return
@@ -406,6 +521,39 @@ internal class CompensatedImuLeanExperiment(
             intervalStart = if (matchGpsInterval) start else null,
             intervalEnd = if (matchGpsInterval) end else null,
         )
+    }
+
+    /**
+     * A near-zero endpoint can still be braking. Require a contiguous low-speed
+     * GPS history before treating acceleration as gravity. Reported speed errors
+     * supply a conservative engineering allowance, not a calibrated confidence bound.
+     */
+    private fun stationarySpeedTrace(timestamp: Long): StationarySpeedTrace {
+        val start = timestamp - STATIONARY_SPEED_WINDOW_NANOS
+        val points = speedHistory.toList()
+        val first = points.indexOfLast { it.timestampNanos <= start }
+        val missing = StationarySpeedTrace(start, timestamp, false)
+        if (first < 0 || points.lastOrNull()?.timestampNanos != timestamp) return missing
+        val window = points.drop(first)
+        var maximumAccelerationUpper = 0.0
+        for ((before, after) in window.zipWithNext()) {
+            val seconds = (after.timestampNanos - before.timestampNanos) / 1e9
+            if (seconds !in 0.3..2.5) return missing
+            val error = sqrt(before.speedAccuracyMps * before.speedAccuracyMps +
+                after.speedAccuracyMps * after.speedAccuracyMps)
+            maximumAccelerationUpper = maxOf(maximumAccelerationUpper,
+                (abs(after.speedMps - before.speedMps) + error) / seconds)
+        }
+        val lastInterval = (window.last().timestampNanos -
+            window[window.lastIndex - 1].timestampNanos) / 1e9
+        // With coarse GPS, braking may finish before the complete quiet IMU
+        // window. A two-second speed difference is not acceleration at its end.
+        // Only a near-zero endpoint may use this path; the IMU guard still runs.
+        val coarseStop = lastInterval >= STATIONARY_COARSE_INTERVAL_SECONDS &&
+            window.last().speedMps <= STATIONARY_COARSE_STOP_SPEED_MPS
+        return StationarySpeedTrace(window.first().timestampNanos, timestamp, true,
+            window.maxOf { it.speedMps }, window.maxOf { it.speedAccuracyMps },
+            maximumAccelerationUpper, coarseStop)
     }
 
     private fun speedAt(timestamp: Long): Double? {
@@ -593,6 +741,12 @@ internal class CompensatedImuLeanExperiment(
     companion object {
         // Engineering quality thresholds, not calibrated confidence bounds.
         const val STATIONARY_WINDOW_NANOS = 750_000_000L
+        const val STATIONARY_SPEED_WINDOW_NANOS = 750_000_000L
+        const val STATIONARY_MAX_SPEED_MPS = 0.4
+        const val STATIONARY_MAX_SPEED_ACCURACY_MPS = 0.3
+        const val STATIONARY_MAX_ACCELERATION_UPPER_MPS2 = 0.5
+        const val STATIONARY_COARSE_INTERVAL_SECONDS = 1.5
+        const val STATIONARY_COARSE_STOP_SPEED_MPS = 0.1
         const val STATIONARY_ACCELERATION_DELTA_MPS2 = 1.0
         const val STATIONARY_ANGULAR_RATE_RADPS = 0.12
 

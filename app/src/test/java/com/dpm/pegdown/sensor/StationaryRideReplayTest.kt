@@ -22,6 +22,7 @@ class StationaryRideReplayTest {
         var oldStationaryAccepted = 0
         var newStationaryAccepted = 0
         var unstable = 0
+        var speedUncertain = 0
         var missing = 0
         var gyroRejected = 0
         var accelerationRejected = 0
@@ -129,8 +130,14 @@ class StationaryRideReplayTest {
                                 val trace = changed.gravityTrace?.stationaryTrace
                                 stationaryContext.addLast("t=${(time-origin)/1e9} old=${original.reason} new=${changed.reason} oldBank=${baseline!!.chassisBankDegrees} newBank=${candidate!!.chassisBankDegrees} vectorDelta=${trace?.maxMeanAccelerationDifferenceMps2} gyroMean=${trace?.maxMeanAngularRateRadps}")
                                 while (stationaryContext.size > 12) stationaryContext.removeFirst()
-                                if (changed.reason == CompensatedImuLeanExperiment.DecisionReason.STATIONARY_UNSTABLE) {
-                                    unstable++; blockedRun++
+                                if (changed.reason == CompensatedImuLeanExperiment.DecisionReason.STATIONARY_SPEED_UNCERTAIN) {
+                                    speedUncertain++
+                                    stationaryContext.addLast("speed=${changed.stationarySpeedTrace}")
+                                }
+                                if (changed.reason == CompensatedImuLeanExperiment.DecisionReason.STATIONARY_UNSTABLE ||
+                                    changed.reason == CompensatedImuLeanExperiment.DecisionReason.STATIONARY_SPEED_UNCERTAIN) {
+                                    if (changed.reason == CompensatedImuLeanExperiment.DecisionReason.STATIONARY_UNSTABLE) unstable++
+                                    blockedRun++
                                     if (blockedRun > longestBlockedRun) {
                                         longestBlockedRun = blockedRun
                                         longestBlockedEndedAt = (time-origin)/1e9
@@ -161,6 +168,6 @@ class StationaryRideReplayTest {
         assertTrue(compared > 100)
         assertNotNull(candidate)
         assertEquals(baseline!!.gyroGaps, candidate!!.gyroGaps)
-        println("STATIONARY_AUDIT source=${file.name} compared=$compared oldAccepted=$oldStationaryAccepted newAccepted=$newStationaryAccepted unstable=$unstable missingHistory=$missing warmMissingHistory=$warmMissing gyroRejected=$gyroRejected accelerationRejected=$accelerationRejected qualifiedOtherRejection=$qualifiedRejected maxIdleFixes=$maxIdleRun longestBlockedFixes=$longestBlockedRun blockedRunEndedAt=$longestBlockedEndedAt meanDisplayDifference=${absoluteDifferenceSum/compared} maximumDisplayDifference=$maximumDifference maximumAt=$differenceAt gyroGaps=${candidate!!.gyroGaps} finalSpeed=$latestSpeed lastFixTime=$latestFixTime decisions=$decisions")
+        println("STATIONARY_AUDIT source=${file.name} compared=$compared oldAccepted=$oldStationaryAccepted newAccepted=$newStationaryAccepted unstable=$unstable speedUncertain=$speedUncertain missingHistory=$missing warmMissingHistory=$warmMissing gyroRejected=$gyroRejected accelerationRejected=$accelerationRejected qualifiedOtherRejection=$qualifiedRejected maxIdleFixes=$maxIdleRun longestBlockedFixes=$longestBlockedRun blockedRunEndedAt=$longestBlockedEndedAt meanDisplayDifference=${absoluteDifferenceSum/compared} maximumDisplayDifference=$maximumDifference maximumAt=$differenceAt gyroGaps=${candidate!!.gyroGaps} finalSpeed=$latestSpeed lastFixTime=$latestFixTime decisions=$decisions")
     }
 }

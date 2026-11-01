@@ -14,6 +14,89 @@ class NovemberRideStartReplayTest {
         if (pair.size == 2) pair[0] to pair[1] else null
     }.toMap()
 
+    @Test fun bundledNovemberReferenceReproducesTheRecordedUpdateAndRejectsIt() {
+        val resource = requireNotNull(javaClass.getResourceAsStream(
+            "november_20261101_stationary_reference.csv"))
+        val lines = resource.bufferedReader().use { it.readLines() }
+        val attributes = lines.filter { it.startsWith("# ") }.associate {
+            val pair = it.removePrefix("# ").split("=", limit = 2)
+            pair[0] to pair[1]
+        }
+        fun attribute(key: String) = attributes.getValue(key).toDouble()
+        fun fix(value: String): CompensatedImuLeanExperiment.Fix {
+            val f = value.split(";")
+            return CompensatedImuLeanExperiment.Fix(f[0].toLong(), f[1].toLong(),
+                f[2].toDouble(), f[3].toDouble(), f[4].toDouble(), f[5].toDouble(),
+                f[6].toDouble(), f[7].toBoolean(), f[8].toBoolean(), f[9])
+        }
+        data class Sample(val type: Int, val time: Long, val value: ImuVector)
+        val samples = lines.filter { it.startsWith("1,") || it.startsWith("4,") }.map {
+            val f = it.split(",")
+            Sample(f[0].toInt(), f[1].toLong(),
+                ImuVector(f[2].toDouble(), f[3].toDouble(), f[4].toDouble()))
+        }
+        val g = attributes.getValue("reference_up").split(";").map { it.toDouble() }
+        val up = ImuVector(g[0], g[1], g[2]).unit()
+        val forward = CompensatedImuLeanExperiment.assumedForwardFromScreen(up)
+        val right = forward.cross(up).unit()
+        val target = fix(attributes.getValue("target_fix"))
+        val bank = Math.toRadians(attribute("predicted_bank_degrees"))
+        val pitch = Math.toRadians(attribute("predicted_pitch_degrees"))
+        val checkpointUp = up * (cos(pitch) * cos(bank)) -
+            right * (cos(pitch) * sin(bank)) + forward * sin(pitch)
+        val checkpointPose = ImuQuaternion.between(checkpointUp, ImuVector.UP)
+        val gyros = samples.filter { it.type == 4 }
+        val firstTime = gyros.first().time
+        var delta = ImuQuaternion.IDENTITY
+        var previousTime = firstTime
+        for (sample in gyros.drop(1)) {
+            val end = minOf(sample.time, target.timestampNanos)
+            val dt = (end - previousTime) / 1e9
+            if (dt <= 0.0) break
+            val rate = sample.value
+            if (rate.length() > 1e-12)
+                delta = (delta * ImuQuaternion.axisAngle(rate, rate.length() * dt)).unit()
+            previousTime = sample.time
+            if (sample.time >= target.timestampNanos) break
+        }
+        // Anchor the documented pre-update attitude, then replay this one update.
+        // Earlier GPS updates are deliberately not reconstructed by this local test.
+        val seed = (checkpointPose * delta.inverse()).unit()
+        val control = CompensatedImuLeanExperiment(up, forward, seed, firstTime,
+            matchGpsInterval = true, allowSlowCourseCorrections = true)
+        val guarded = CompensatedImuLeanExperiment(up, forward, seed, firstTime,
+            matchGpsInterval = true, allowSlowCourseCorrections = true,
+            qualifyStationaryCorrections = true, correctStraightRideDrift = true)
+        val engines = listOf(control, guarded)
+        lines.filter { it.startsWith("# preceding_fix=") }.forEach { line ->
+            val previous = fix(line.substringAfter("="))
+            engines.forEach { it.onFix(previous) }
+        }
+        samples.forEach { sample -> engines.forEach { e ->
+            if (sample.type == 4) e.onGyroscope(sample.time, sample.value)
+            else e.onAccelerometer(sample.time, sample.value)
+        } }
+        engines.forEach {
+            assertEquals(attribute("expected_bank_before"), it.chassisBankDegrees, .00001)
+        }
+        val guardedBefore = guarded.chassisBankDegrees
+        engines.forEach { it.onFix(target) }
+        val old = control.lastDecision!!
+        assertEquals(CompensatedImuLeanExperiment.DecisionReason.ACCEPTED, old.reason)
+        assertEquals(attribute("expected_bank_after"), control.chassisBankDegrees, .00001)
+        val originalGravity = requireNotNull(old.gravityTrace)
+        assertEquals(attribute("expected_applied_rotation"), originalGravity.appliedRotationDegrees!!, .00001)
+        val rejected = guarded.lastDecision!!
+        assertEquals(CompensatedImuLeanExperiment.DecisionReason.STATIONARY_UNSTABLE, rejected.reason)
+        assertTrue(rejected.stationarySpeedTrace!!.qualified)
+        val stationary = requireNotNull(rejected.gravityTrace?.stationaryTrace)
+        assertTrue(stationary.historyCovered)
+        assertTrue(stationary.maxMeanAngularRateRadps!! > .12)
+        assertEquals(guardedBefore, guarded.chassisBankDegrees, 0.0)
+        engines.forEach { assertEquals(0, it.gyroGaps) }
+        println("NOVEMBER_BUNDLED samples=${samples.size} originalRotation=${originalGravity.appliedRotationDegrees} guarded=${rejected.reason}")
+    }
+
     @Test fun reconstructStationaryCheckpointAndWithholdOneStartupCorrection() {
         val path = System.getenv("PEGDOWN_NOVEMBER_DIAGNOSTICS_ZIP")
         assumeNotNull(path)

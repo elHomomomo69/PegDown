@@ -8,6 +8,8 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import com.dpm.pegdown.BuildConfig
+import com.dpm.pegdown.R
 import com.dpm.pegdown.model.TourLogEntry
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -749,6 +751,7 @@ class SensorProcessor(
                 matchGpsInterval = true,
                 allowSlowCourseCorrections = true,
                 qualifyStationaryCorrections = true,
+                correctStraightRideDrift = true,
             )
             experimentalDisplay = if (experimentalRecovering) null
                 else experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
@@ -809,7 +812,7 @@ class SensorProcessor(
         val estimator = experimentalEstimator ?: return
         if (!experimentalLeanEnabled) return
         val bankBefore = estimator.chassisBankDegrees
-        estimator.onFix(fix)
+        estimator.onFix(fix, allowStraightCorrection = !experimentalRecovering)
         val decision = estimator.lastDecision ?: return
         if (experimentalRecovering) {
             confirmExperimentalRecovery(estimator, decision, fix)
@@ -859,6 +862,22 @@ class SensorProcessor(
                 "stationary_mean_acceleration_delta_mps2=${trace?.stationaryTrace?.maxMeanAccelerationDifferenceMps2}",
                 "stationary_mean_angular_rate_radps=${trace?.stationaryTrace?.maxMeanAngularRateRadps}",
                 "stationary_qualified=${trace?.stationaryTrace?.qualified}",
+                "stationary_speed_history_covered=${decision.stationarySpeedTrace?.historyCovered}",
+                "stationary_speed_interval_start_ns=${decision.stationarySpeedTrace?.intervalStartNanos}",
+                "stationary_speed_interval_end_ns=${decision.stationarySpeedTrace?.intervalEndNanos}",
+                "stationary_max_speed_mps=${decision.stationarySpeedTrace?.maximumSpeedMps}",
+                "stationary_max_speed_accuracy_mps=${decision.stationarySpeedTrace?.maximumSpeedAccuracyMps}",
+                "stationary_max_acceleration_upper_mps2=${decision.stationarySpeedTrace?.maximumAccelerationUpperMps2}",
+                "stationary_speed_qualified=${decision.stationarySpeedTrace?.qualified}",
+                "stationary_speed_coarse_stop_transition=${decision.stationarySpeedTrace?.coarseStopTransition}",
+                "straight_reason=${estimator.straightTrace?.reason}",
+                "straight_qualified=${estimator.straightTrace?.qualified}",
+                "straight_duration_seconds=${estimator.straightTrace?.durationSeconds}",
+                "straight_observation_count=${estimator.straightTrace?.observationCount}",
+                "straight_course_range_degrees=${estimator.straightTrace?.courseRangeDegrees}",
+                "straight_course_uncertainty_bank_degrees=${estimator.straightTrace?.courseUncertaintyBankDegrees}",
+                "straight_reference_bank_degrees=${estimator.straightTrace?.referenceBankDegrees}",
+                "straight_applied_bank_delta_degrees=${estimator.straightTrace?.appliedBankDeltaDegrees}",
             ).joinToString("; ")
             listener.onDiagnosticLeanCorrection(
                 decision.timestampNanos, arrivalNanos, decision.reason.name, metadata,
@@ -917,6 +936,9 @@ class SensorProcessor(
         val calibration = calibrationQuaternion
         val gravity = calibrationGravity
         return listOf(
+            "app_version_name=" + BuildConfig.VERSION_NAME,
+            "app_version_code=" + BuildConfig.VERSION_CODE,
+            "app_build_id=" + context.getString(R.string.app_build_id),
             "manufacturer=" + Build.MANUFACTURER,
             "model=" + Build.MODEL,
             "android_sdk=" + Build.VERSION.SDK_INT,
@@ -940,7 +962,20 @@ class SensorProcessor(
             "experimental_slow_max_course_accuracy_degrees=2",
             "experimental_slow_max_lateral_sigma_mps2=0.5",
             "experimental_slow_course_gyro_gate=true",
+            "experimental_straight_reference=true",
+            "experimental_straight_reference_version=1",
+            "experimental_straight_window_ns=${StraightRideReference.WINDOW_NANOS}",
+            "experimental_straight_min_speed_mps=${StraightRideReference.MINIMUM_SPEED_MPS}",
+            "experimental_straight_max_correction_degps=${StraightRideReference.MAXIMUM_CORRECTION_DEGREES_PER_SECOND}",
+            "experimental_straight_bank_deadband_degrees=${StraightRideReference.BANK_DEADBAND_DEGREES}",
             "experimental_stationary_guard=true",
+            "experimental_stationary_guard_version=2",
+            "experimental_stationary_speed_window_ns=${CompensatedImuLeanExperiment.STATIONARY_SPEED_WINDOW_NANOS}",
+            "experimental_stationary_max_speed_mps=${CompensatedImuLeanExperiment.STATIONARY_MAX_SPEED_MPS}",
+            "experimental_stationary_max_speed_accuracy_mps=${CompensatedImuLeanExperiment.STATIONARY_MAX_SPEED_ACCURACY_MPS}",
+            "experimental_stationary_max_acceleration_upper_mps2=${CompensatedImuLeanExperiment.STATIONARY_MAX_ACCELERATION_UPPER_MPS2}",
+            "experimental_stationary_coarse_interval_seconds=${CompensatedImuLeanExperiment.STATIONARY_COARSE_INTERVAL_SECONDS}",
+            "experimental_stationary_coarse_stop_speed_mps=${CompensatedImuLeanExperiment.STATIONARY_COARSE_STOP_SPEED_MPS}",
             "experimental_stationary_window_ns=${CompensatedImuLeanExperiment.STATIONARY_WINDOW_NANOS}",
             "experimental_stationary_acceleration_delta_mps2=${CompensatedImuLeanExperiment.STATIONARY_ACCELERATION_DELTA_MPS2}",
             "experimental_stationary_angular_rate_radps=${CompensatedImuLeanExperiment.STATIONARY_ANGULAR_RATE_RADPS}",

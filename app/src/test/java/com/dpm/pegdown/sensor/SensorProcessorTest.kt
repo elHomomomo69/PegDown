@@ -1,6 +1,8 @@
 package com.dpm.pegdown.sensor
 
 import android.content.Context
+import com.dpm.pegdown.BuildConfig
+import com.dpm.pegdown.R
 import android.hardware.SensorManager
 import android.os.Handler
 import android.os.Looper
@@ -36,6 +38,7 @@ class SensorProcessorTest {
         mockkStatic(Looper::class)
         every { Looper.getMainLooper() } returns mockk(relaxed = true)
         
+        every { context.getString(R.string.app_build_id) } returns "ABCDEF012345"
         every { context.getSystemService(Context.SENSOR_SERVICE) } returns sensorManager
         every { context.getSystemService(Context.WINDOW_SERVICE) } returns windowManager
         
@@ -47,6 +50,21 @@ class SensorProcessorTest {
         
         monotonicNow = 1_000_000_000L
         sensorProcessor = SensorProcessor(context, listener) { monotonicNow }
+    }
+
+    @Test
+    fun diagnosticMetadataContainsTheDisplayedBuildIdentityAndStationaryPolicy() {
+        val metadata = sensorProcessor.diagnosticSessionMetadata()
+            .split("; ").associate { entry ->
+                val pair = entry.split("=", limit = 2)
+                pair[0] to pair[1]
+            }
+        assertEquals(BuildConfig.VERSION_NAME, metadata["app_version_name"])
+        assertEquals(BuildConfig.VERSION_CODE.toString(), metadata["app_version_code"])
+        assertEquals("ABCDEF012345", metadata["app_build_id"])
+        assertEquals("2", metadata["experimental_stationary_guard_version"])
+        assertEquals("750000000", metadata["experimental_stationary_speed_window_ns"])
+        assertEquals("0.5", metadata["experimental_stationary_max_acceleration_upper_mps2"])
     }
 
     @After
@@ -336,7 +354,26 @@ class SensorProcessorTest {
             listener.onDiagnosticLeanCorrection(any(), any(), "STATIONARY_UNSTABLE", match {
                 it.contains("stationary_history_covered=true") &&
                     it.contains("stationary_qualified=false") &&
-                    !it.contains("stationary_mean_angular_rate_radps=null")
+                    it.contains("stationary_speed_history_covered=true") &&
+                    it.contains("stationary_speed_qualified=true") &&
+                    !it.contains("stationary_mean_angular_rate_radps=null") &&
+                    it.contains("straight_reason=STATIONARY") &&
+                    it.contains("straight_applied_bank_delta_degrees=0.0")
+            })
+        }
+    }
+
+    @Test
+    fun stationarySpeedWaitIsLoggedWithoutChangingTheBank() {
+        calibrateExperimental()
+        sensorProcessor.isRecording = true
+        feedRecovery(0.0, 1)
+        io.mockk.verify {
+            listener.onDiagnosticLeanCorrection(any(), any(), "STATIONARY_SPEED_UNCERTAIN", match {
+                fun bank(key: String) = Regex("$key=([^;]+)").find(it)!!.groupValues[1].toDouble()
+                it.contains("stationary_speed_history_covered=false") &&
+                    it.contains("stationary_speed_qualified=false") &&
+                    bank("bank_before_degrees") == bank("bank_after_degrees")
             })
         }
     }
@@ -355,8 +392,13 @@ class SensorProcessorTest {
         repeat(30) { sensorProcessor.handleRotationVector(mounted) }
         io.mockk.verify { listener.onDiagnosticCalibration(match {
             it.contains("lean_mode=experimental_full_interval") && it.contains("calibration_gravity_xyz=") &&
+                it.contains("app_build_id=ABCDEF012345") &&
+                it.contains("app_version_name=${BuildConfig.VERSION_NAME}") &&
                 it.contains("experimental_stationary_guard=true") &&
-                it.contains("experimental_stationary_window_ns=750000000")
+                it.contains("experimental_stationary_guard_version=2") &&
+                it.contains("experimental_stationary_window_ns=750000000") &&
+                it.contains("experimental_straight_reference=true") &&
+                it.contains("experimental_straight_window_ns=5000000000")
         }) }
     }
 
