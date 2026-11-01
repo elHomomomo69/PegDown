@@ -88,6 +88,8 @@ internal class CompensatedImuLeanExperiment(
     private val checkYawConsistency: Boolean = false,
     private val allowSlowCourseCorrections: Boolean = false,
     private val matchGpsInterval: Boolean = false,
+    // SensorProcessor enables this for live estimation; false preserves historical replay controls.
+    private val qualifyStationaryCorrections: Boolean = false,
     private val courseLagSeconds: Double = 0.0,
     // Diagnostic ablation only: retain every input/history, omit specified updates.
     private val withheldReferenceTimes: Set<Long> = emptySet(),
@@ -111,6 +113,26 @@ internal class CompensatedImuLeanExperiment(
         INSUFFICIENT_STATES, ROLLING(true), CHANGING_YAW(true),
         MISSING_HISTORY, MISSING_SPEED_HISTORY, INSUFFICIENT_ACCELERATION,
         IMPLAUSIBLE_GRAVITY(true), LARGE_INNOVATION(true), COURSE_GYRO_MISMATCH(true),
+        STATIONARY_UNSTABLE(true),
+    }
+
+    data class MotionTrace(
+        val intervalStartNanos: Long, val intervalEndNanos: Long,
+        val intervalSeconds: Double, val binCount: Int,
+        val maxRollRate: Double, val yawRateRange: Double,
+        val meanGyroYawRate: Double, val sigmaLateralMps2: Double,
+    )
+
+    data class StationaryTrace(
+        val intervalStartNanos: Long,
+        val intervalEndNanos: Long,
+        val historyCovered: Boolean,
+        val maxMeanAccelerationDifferenceMps2: Double? = null,
+        val maxMeanAngularRateRadps: Double? = null,
+    ) {
+        val qualified: Boolean get() = historyCovered &&
+            maxMeanAccelerationDifferenceMps2?.let { it <= STATIONARY_ACCELERATION_DELTA_MPS2 } == true &&
+            maxMeanAngularRateRadps?.let { it <= STATIONARY_ANGULAR_RATE_RADPS } == true
     }
 
     data class GravityTrace(
@@ -128,6 +150,12 @@ internal class CompensatedImuLeanExperiment(
         val gain: Double,
         val currentBankBefore: Double,
         val currentBankAfter: Double? = null,
+        val rawAccelerationPeakMps2: Double = Double.NaN,
+        val rawAccelerationRmsDeviationMps2: Double = Double.NaN,
+        val accelerationSampleCount: Int = 0,
+        val requestedRotationDegrees: Double? = null,
+        val appliedRotationDegrees: Double? = null,
+        val stationaryTrace: StationaryTrace? = null,
     )
 
     data class CorrectionDecision(
@@ -141,8 +169,10 @@ internal class CompensatedImuLeanExperiment(
         val courseRate: Double? = null,
         val meanGyroYawRate: Double? = null,
         val yawDiscrepancyLimit: Double? = null,
+        val motionTrace: MotionTrace? = null,
     )
 
+    private var activeMotionTrace: MotionTrace? = null
     private val decisionLog = mutableListOf<CorrectionDecision>()
     val decisions: List<CorrectionDecision>
         get() = decisionLog.toList()
@@ -150,7 +180,13 @@ internal class CompensatedImuLeanExperiment(
     val lastDecision: CorrectionDecision?
         get() = decisionLog.lastOrNull()
 
-    private fun record(decision: CorrectionDecision) {
+    private fun record(input: CorrectionDecision) {
+        val motion = input.motionTrace ?: activeMotionTrace
+        val decision = input.copy(
+            maxRollRate = input.maxRollRate ?: motion?.maxRollRate,
+            yawRateRange = input.yawRateRange ?: motion?.yawRateRange,
+            motionTrace = motion,
+        )
         if (decisionLog.size >= 1024) decisionLog.removeAt(0)
         decisionLog.add(decision)
         if (decision.reason.rejected) rejectedCorrections++
@@ -233,6 +269,7 @@ internal class CompensatedImuLeanExperiment(
     }
 
     fun onFix(fix: Fix) {
+        activeMotionTrace = null
         if (fix.provider != "gps") {
             record(CorrectionDecision(fix.timestampNanos, DecisionReason.NON_GPS))
             return
@@ -257,7 +294,7 @@ internal class CompensatedImuLeanExperiment(
         speedHistory.addLast(fix)
         if (fix.speedMps <= 0.4) {
             val dt = previous?.let { (fix.timestampNanos - it.timestampNanos) / 1e9 } ?: 1.0
-            correctAt(fix.timestampNanos, ImuVector.ZERO, dt.coerceIn(0.0, 2.5), 1.0)
+            correctAt(fix.timestampNanos, ImuVector.ZERO, dt.coerceIn(0.0, 2.5), 1.0, stationary = true)
             return
         }
         fun goodCourse(value: Fix) = value.hasBearing && value.bearingDegrees.isFinite() &&
@@ -318,6 +355,12 @@ internal class CompensatedImuLeanExperiment(
         val maxRollRate = rates.maxOfOrNull { it.first } ?: 0.0
         val yawRateRange = if (rates.isEmpty()) 0.0 else
             rates.maxOf { it.second } - rates.minOf { it.second }
+        val diagnosticSigma = speed * Math.toRadians(sqrt(
+            fix.bearingAccuracyDegrees * fix.bearingAccuracyDegrees +
+                previous.bearingAccuracyDegrees * previous.bearingAccuracyDegrees
+        )) / dt
+        activeMotionTrace = MotionTrace(start, end, dt, rates.size,
+            maxRollRate, yawRateRange, rates.map { it.second }.average(), diagnosticSigma)
         if (maxRollRate > 0.25 || rates.size < 2 || yawRateRange > 0.10) {
             val reason = if (maxRollRate > 0.25) DecisionReason.ROLLING else DecisionReason.CHANGING_YAW
             record(CorrectionDecision(midpoint, reason, maxRollRate, yawRateRange))
@@ -392,10 +435,47 @@ internal class CompensatedImuLeanExperiment(
         return (before.orientation * relative.fractionalRotation(fraction)).unit()
     }
 
+    /**
+     * GPS zero speed can lag the actual start. Require three stable 250 ms means,
+     * transported into the same body frame, before trusting gravity at rest.
+     * Compare measured vectors with each other, not with the drifting estimate:
+     * a stable true lean (including the side stand) can still correct drift.
+     */
+    private fun stationaryTrace(centre: Long, q: ImuQuaternion, measured: ImuVector): StationaryTrace {
+        val latestCoveredAcceleration = acceleration.lastOrNull { it.timestampNanos <= lastGyroTime }
+        val end = minOf(centre + 150_000_000L,
+            latestCoveredAcceleration?.timestampNanos ?: return StationaryTrace(centre, centre, false))
+        val start = end - STATIONARY_WINDOW_NANOS
+        val missing = StationaryTrace(start, end, false)
+        if (end < centre) return missing
+        val transported = acceleration.filter {
+            it.timestampNanos in (start - 150_000_000L)..(end + 150_000_000L)
+        }.mapNotNull { sample ->
+            stateAt(sample.timestampNanos)?.let { pose ->
+                sample.timestampNanos to q.inverse().rotate(pose.rotate(sample.value))
+            }
+        }
+        val rates = states.map { it.timestampNanos to it.angularRate }
+        val means = mutableListOf(measured)
+        var maxRate = 0.0
+        repeat(3) { bin ->
+            val left = start + bin * 250_000_000L
+            val right = left + 250_000_000L
+            means.add(timeWeightedMean(transported, left, right) ?: return missing)
+            val rate = timeWeightedMean(rates, left, right) ?: return missing
+            maxRate = maxOf(maxRate, rate.length())
+        }
+        var maxDifference = 0.0
+        for (i in means.indices) for (j in 0 until i)
+            maxDifference = maxOf(maxDifference, (means[i] - means[j]).length())
+        return StationaryTrace(start, end, true, maxDifference, maxRate)
+    }
+
     private fun correctAt(
         timestamp: Long, vehicleAcceleration: ImuVector, dt: Double, quality: Double,
         courseRate: Double = 0.0, meanGyroYawRate: Double? = null,
         intervalStart: Long? = null, intervalEnd: Long? = null,
+        stationary: Boolean = false,
     ) {
         val q = if (historicalAlignment) stateAt(timestamp) else orientation
         if (q == null) {
@@ -424,6 +504,16 @@ internal class CompensatedImuLeanExperiment(
             record(CorrectionDecision(timestamp, DecisionReason.INSUFFICIENT_ACCELERATION))
             return
         }
+        val rawWindow = acceleration.filter {
+            if (intervalStart != null && intervalEnd != null)
+                it.timestampNanos in intervalStart..intervalEnd
+            else abs(it.timestampNanos - centre) <= 150_000_000L
+        }
+        val rawMean = if (rawWindow.isEmpty()) ImuVector.ZERO else
+            rawWindow.fold(ImuVector.ZERO) { sum, sample -> sum + sample.value } * (1.0 / rawWindow.size)
+        val rawPeak = rawWindow.maxOfOrNull { it.value.length() } ?: Double.NaN
+        val rawRms = if (rawWindow.isEmpty()) Double.NaN else sqrt(
+            rawWindow.sumOf { (it.value - rawMean).dot(it.value - rawMean) } / rawWindow.size)
         val predictedUp = up(q)
         val horizontalForward = (forward - predictedUp * forward.dot(predictedUp)).unit()
         val right = forward.cross(predictedUp).unit()
@@ -440,7 +530,16 @@ internal class CompensatedImuLeanExperiment(
             geometry.bankDegrees(inferredGravity),
             geometry.pitchDegrees(predictedUp), geometry.pitchDegrees(inferredGravity),
             gain, chassisBankDegrees,
+            rawAccelerationPeakMps2 = rawPeak, rawAccelerationRmsDeviationMps2 = rawRms,
+            accelerationSampleCount = rawWindow.size,
+            stationaryTrace = if (stationary && qualifyStationaryCorrections)
+                stationaryTrace(centre, q, measured) else null,
         )
+        if (trace.stationaryTrace?.qualified == false) {
+            record(CorrectionDecision(timestamp, DecisionReason.STATIONARY_UNSTABLE,
+                gravityMagnitude = inferredGravity.length(), gravityTrace = trace))
+            return
+        }
         if (abs(inferredGravity.length() - 9.80665) > 1.5) {
             record(CorrectionDecision(
                 timestamp, DecisionReason.IMPLAUSIBLE_GRAVITY,
@@ -465,7 +564,9 @@ internal class CompensatedImuLeanExperiment(
                 timestamp, DecisionReason.DIAGNOSTIC_HOLDOUT,
                 gravityMagnitude = inferredGravity.length(),
                 innovationDegrees = Math.toDegrees(innovation),
-                gravityTrace = trace.copy(currentBankAfter = chassisBankDegrees),
+                gravityTrace = trace.copy(currentBankAfter = chassisBankDegrees,
+                requestedRotationDegrees = Math.toDegrees(innovation * gain),
+                appliedRotationDegrees = 0.0),
             ))
             return
         }
@@ -482,11 +583,19 @@ internal class CompensatedImuLeanExperiment(
             timestamp, DecisionReason.ACCEPTED,
             gravityMagnitude = inferredGravity.length(),
             innovationDegrees = Math.toDegrees(innovation),
-            gravityTrace = trace.copy(currentBankAfter = chassisBankDegrees),
+            gravityTrace = trace.copy(currentBankAfter = chassisBankDegrees,
+                gain = gain,
+                requestedRotationDegrees = Math.toDegrees(innovation * gain),
+                appliedRotationDegrees = Math.toDegrees(innovation * gain)),
         ))
     }
 
     companion object {
+        // Engineering quality thresholds, not calibrated confidence bounds.
+        const val STATIONARY_WINDOW_NANOS = 750_000_000L
+        const val STATIONARY_ACCELERATION_DELTA_MPS2 = 1.0
+        const val STATIONARY_ANGULAR_RATE_RADPS = 0.12
+
         /** Piecewise-linear time integral with bracketed endpoints; never extrapolates. */
         fun timeWeightedMean(
             samples: List<Pair<Long, ImuVector>>, start: Long, end: Long,

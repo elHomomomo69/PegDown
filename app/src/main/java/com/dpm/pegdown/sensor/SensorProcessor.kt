@@ -748,6 +748,7 @@ class SensorProcessor(
                 up, forward, ImuQuaternion(q.w, q.x, q.y, q.z), timestampNanos,
                 matchGpsInterval = true,
                 allowSlowCourseCorrections = true,
+                qualifyStationaryCorrections = true,
             )
             experimentalDisplay = if (experimentalRecovering) null
                 else experimentalEstimator!!.chassisBankDegrees.coerceIn(-65.0, 65.0)
@@ -837,6 +838,27 @@ class SensorProcessor(
                 "inferred_bank_degrees=${trace?.inferredBank}",
                 "predicted_pitch_degrees=${trace?.predictedPitch}",
                 "inferred_pitch_degrees=${trace?.inferredPitch}",
+                // Raw spread includes riding motion as well as vibration.
+                "raw_acceleration_peak_mps2=${trace?.rawAccelerationPeakMps2}",
+                "raw_acceleration_rms_deviation_mps2=${trace?.rawAccelerationRmsDeviationMps2}",
+                "acceleration_sample_count=${trace?.accelerationSampleCount}",
+                "requested_rotation_degrees=${trace?.requestedRotationDegrees}",
+                "applied_rotation_degrees=${trace?.appliedRotationDegrees}",
+                "bank_delta_degrees=${estimator.chassisBankDegrees - bankBefore}",
+                "fix_age_at_callback_seconds=${(arrivalNanos - fix.timestampNanos) / 1e9}",
+                "motion_interval_start_ns=${decision.motionTrace?.intervalStartNanos}",
+                "motion_interval_end_ns=${decision.motionTrace?.intervalEndNanos}",
+                "motion_interval_seconds=${decision.motionTrace?.intervalSeconds}",
+                "motion_bin_count=${decision.motionTrace?.binCount}",
+                "sigma_lateral_mps2=${decision.motionTrace?.sigmaLateralMps2}",
+                "roll_rate_margin_radps=${decision.maxRollRate?.let { 0.25 - it }}",
+                "yaw_range_margin_radps=${decision.yawRateRange?.let { 0.10 - it }}",
+                "stationary_history_covered=${trace?.stationaryTrace?.historyCovered}",
+                "stationary_interval_start_ns=${trace?.stationaryTrace?.intervalStartNanos}",
+                "stationary_interval_end_ns=${trace?.stationaryTrace?.intervalEndNanos}",
+                "stationary_mean_acceleration_delta_mps2=${trace?.stationaryTrace?.maxMeanAccelerationDifferenceMps2}",
+                "stationary_mean_angular_rate_radps=${trace?.stationaryTrace?.maxMeanAngularRateRadps}",
+                "stationary_qualified=${trace?.stationaryTrace?.qualified}",
             ).joinToString("; ")
             listener.onDiagnosticLeanCorrection(
                 decision.timestampNanos, arrivalNanos, decision.reason.name, metadata,
@@ -918,6 +940,10 @@ class SensorProcessor(
             "experimental_slow_max_course_accuracy_degrees=2",
             "experimental_slow_max_lateral_sigma_mps2=0.5",
             "experimental_slow_course_gyro_gate=true",
+            "experimental_stationary_guard=true",
+            "experimental_stationary_window_ns=${CompensatedImuLeanExperiment.STATIONARY_WINDOW_NANOS}",
+            "experimental_stationary_acceleration_delta_mps2=${CompensatedImuLeanExperiment.STATIONARY_ACCELERATION_DELTA_MPS2}",
+            "experimental_stationary_angular_rate_radps=${CompensatedImuLeanExperiment.STATIONARY_ANGULAR_RATE_RADPS}",
             "experimental_gyro_bias_xyz=0;0;0",
             "experimental_mount_yaw_degrees=0",
             "mount_axis_assumption=device_z_along_motorcycle_forward",

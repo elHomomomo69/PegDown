@@ -328,6 +328,20 @@ class SensorProcessorTest {
     }
 
     @Test
+    fun `stationary guard rejection is included in live correction diagnostics`() {
+        calibrateExperimental()
+        sensorProcessor.isRecording = true
+        feedRecovery(0.0, 2, yawRate = 0.3)
+        io.mockk.verify {
+            listener.onDiagnosticLeanCorrection(any(), any(), "STATIONARY_UNSTABLE", match {
+                it.contains("stationary_history_covered=true") &&
+                    it.contains("stationary_qualified=false") &&
+                    !it.contains("stationary_mean_angular_rate_radps=null")
+            })
+        }
+    }
+
+    @Test
     fun `calibration during recording emits reference metadata for replay`() {
         sensorProcessor.isRecording = true
         calibrateExperimental()
@@ -340,7 +354,9 @@ class SensorProcessorTest {
             kotlin.math.cos(Math.toRadians(40.0)).toFloat())
         repeat(30) { sensorProcessor.handleRotationVector(mounted) }
         io.mockk.verify { listener.onDiagnosticCalibration(match {
-            it.contains("lean_mode=experimental_full_interval") && it.contains("calibration_gravity_xyz=")
+            it.contains("lean_mode=experimental_full_interval") && it.contains("calibration_gravity_xyz=") &&
+                it.contains("experimental_stationary_guard=true") &&
+                it.contains("experimental_stationary_window_ns=750000000")
         }) }
     }
 

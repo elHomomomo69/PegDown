@@ -1,5 +1,6 @@
 <resources>
     <string name="app_name" translatable="false">PegDown</string>
+    <string name="app_build_label" translatable="false">v%1$s (%2$d)\nBuild %3$s</string>
     <string name="tour_max_format">Tour Max — L: %1$.1f° | R: %2$.1f° | Acc: +%3$.2fg | Brake: %4$.2fg</string>
     <string name="calibrated_format">Calibrated (%.1f°)</string>
     <string name="not_calibrated">Not calibrated</string>

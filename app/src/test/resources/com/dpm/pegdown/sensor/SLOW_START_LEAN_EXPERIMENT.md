@@ -25,7 +25,9 @@ gravity-magnitude and innovation checks remain. Course error bounds are not
 calibrated confidence intervals. Corrections still use the full interval's
 motion-compensated acceleration. No straight-road zero forcing is introduced.
 At walking pace or with poor course data, the estimator continues gyro
-propagation. The existing stationary correction still applies at <=0.4 m/s.
+propagation. The stationary correction applies at <=0.4 m/s. Since November 1,
+SensorProcessor additionally requires stable sensor history before using that
+reference; see [STATIONARY_GRAVITY_GUARD.md](STATIONARY_GRAVITY_GUARD.md).
 
 Above 8 m/s at both endpoints, the algorithm is identical to the control.
 The shared estimator defaults this extension off; SensorProcessor explicitly

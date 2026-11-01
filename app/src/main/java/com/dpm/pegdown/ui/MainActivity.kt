@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.toColorInt
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.dpm.pegdown.BuildConfig
 import com.dpm.pegdown.R
 import com.dpm.pegdown.data.SettingsManager
 import com.dpm.pegdown.data.TourExporter
@@ -519,6 +520,13 @@ class MainActivity : AppCompatActivity(),
         leftContainer.addView(tvStatus)
         leftContainer.addView(btnSettings)
         leftContainer.addView(btnRecord)
+        leftContainer.addView(TextView(this).apply {
+            text = getString(R.string.app_build_label, BuildConfig.VERSION_NAME,
+                BuildConfig.VERSION_CODE, getString(R.string.app_build_id))
+            textSize = 10f
+            setTextColor("#AAAAAA".toColorInt())
+            setPadding(0, (6f * density).toInt(), 0, 0)
+        })
 
         rootLayout.addView(leftContainer)
 
